@@ -114,6 +114,7 @@ const BUILTIN_PROVIDER_META: Record<string, { tone: string; label: string }> = {
 };
 
 const BUILTIN_CLOUD_SLUGS = ['openai', 'anthropic', 'openrouter', 'novita', 'custom'] as const;
+const CLOUD_EDITOR_SLUGS = ['openai', 'anthropic', 'openrouter', 'custom'] as const;
 
 const BUILTIN_PROVIDER_DEFAULT_MODELS: Record<string, string> = {
   novita: 'deepseek/deepseek-v4-pro',
@@ -2128,9 +2129,7 @@ const CloudProviderEditor = ({
 }) => {
   const { t } = useT();
   const defaultSlug: string =
-    initial?.slug ??
-    BUILTIN_CLOUD_SLUGS.find(s => !existingSlugs.includes(s)) ??
-    'custom';
+    initial?.slug ?? CLOUD_EDITOR_SLUGS.find(s => !existingSlugs.includes(s)) ?? 'custom';
   const [slug, setSlug] = useState<string>(defaultSlug);
   const [label, setLabel] = useState<string>(
     initial?.label ?? BUILTIN_PROVIDER_META[defaultSlug]?.label ?? defaultSlug
@@ -2140,6 +2139,9 @@ const CloudProviderEditor = ({
   const [saving, setSaving] = useState(false);
   const isOpenHuman = slug === 'openhuman';
   const hasExistingKey = (initial?.maskedKey ?? '').startsWith('••••');
+  const editorSlugOptions = CLOUD_EDITOR_SLUGS.includes(slug as (typeof CLOUD_EDITOR_SLUGS)[number])
+    ? CLOUD_EDITOR_SLUGS
+    : ([slug, ...CLOUD_EDITOR_SLUGS] as const);
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-stone-900/30 p-4">
@@ -2172,7 +2174,7 @@ const CloudProviderEditor = ({
               }}
               disabled={!!initial}
               className="mt-1 w-full rounded-lg border border-stone-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 px-3 py-2 text-sm text-stone-900 dark:text-neutral-100 disabled:opacity-60 focus:border-primary-400 focus:outline-none focus:ring-1 focus:ring-primary-200">
-              {BUILTIN_CLOUD_SLUGS
+              {editorSlugOptions
                 .filter(s => s === slug || !existingSlugs.includes(s))
                 .map(s => (
                   <option key={s} value={s}>

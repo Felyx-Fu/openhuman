@@ -397,6 +397,49 @@ describe('AIPanel', () => {
     expect(screen.queryByRole('dialog', { name: /Connect Custom/i })).not.toBeInTheDocument();
   });
 
+  it('keeps the Custom editor default on custom when Novita AI is the only unconfigured built-in provider', async () => {
+    vi.mocked(loadAISettings).mockResolvedValue({
+      ...baseSettings,
+      cloudProviders: [
+        {
+          id: 'p_openai_1',
+          slug: 'openai',
+          label: 'OpenAI',
+          endpoint: 'https://api.openai.com/v1',
+          auth_style: 'bearer' as const,
+          has_api_key: true,
+        },
+        {
+          id: 'p_anthropic_1',
+          slug: 'anthropic',
+          label: 'Anthropic',
+          endpoint: 'https://api.anthropic.com/v1',
+          auth_style: 'anthropic' as const,
+          has_api_key: true,
+        },
+        {
+          id: 'p_openrouter_1',
+          slug: 'openrouter',
+          label: 'OpenRouter',
+          endpoint: 'https://openrouter.ai/api/v1',
+          auth_style: 'bearer' as const,
+          has_api_key: true,
+        },
+      ],
+    });
+
+    renderWithProviders(<AIPanel />);
+    await waitFor(() =>
+      expect(screen.getByRole('switch', { name: /Connect Custom/i })).toBeInTheDocument()
+    );
+
+    fireEvent.click(screen.getByRole('switch', { name: /Connect Custom/i }));
+
+    await waitFor(() => expect(screen.getByText(/Add cloud provider/i)).toBeInTheDocument());
+    expect(screen.getByDisplayValue('Custom')).toBeInTheDocument();
+    expect(screen.getByPlaceholderText('https://api.example.com/v1')).toHaveValue('');
+  });
+
   // ─── chip toggle: toggle OFF scrubs routing entries ──────────────────────────
 
   it('toggling OFF an enabled provider scrubs routing entries that reference it', async () => {
