@@ -103,10 +103,20 @@ const BUILTIN_PROVIDER_META: Record<string, { tone: string; label: string }> = {
     label: 'OpenRouter',
     tone: 'bg-slate-100 dark:bg-slate-500/15 ring-slate-300 text-slate-900 dark:text-slate-100',
   },
+  novita: {
+    label: 'Novita AI',
+    tone: 'bg-cyan-50 dark:bg-cyan-500/10 ring-cyan-200 text-cyan-900 dark:text-cyan-100',
+  },
   custom: {
     label: 'Custom',
     tone: 'bg-stone-100 dark:bg-neutral-800 ring-stone-300 text-stone-900 dark:text-neutral-100',
   },
+};
+
+const BUILTIN_CLOUD_SLUGS = ['openai', 'anthropic', 'openrouter', 'novita', 'custom'] as const;
+
+const BUILTIN_PROVIDER_DEFAULT_MODELS: Record<string, string> = {
+  novita: 'deepseek/deepseek-v4-pro',
 };
 
 const WORKLOADS: Workload[] = [
@@ -451,7 +461,9 @@ const ProviderKeyDialog = ({
         ? 'sk-ant-...'
         : slug === 'openrouter'
           ? 'sk-or-...'
-          : 'your-api-key';
+          : slug === 'novita'
+            ? 'Novita API key'
+            : 'your-api-key';
 
   const handleSave = async () => {
     const trimmed = apiKey.trim();
@@ -1515,7 +1527,7 @@ const CustomRoutingDialog = ({
     if (initial.kind === 'cloud' || initial.kind === 'local') return initial.model;
     if (initialSource?.kind === 'cloud') {
       const p = customCloud.find(c => c.slug === initialSource.providerSlug);
-      return p ? '' : '';
+      return p ? (BUILTIN_PROVIDER_DEFAULT_MODELS[p.slug] ?? '') : '';
     }
     return localModels[0]?.id ?? '';
   });
@@ -1591,7 +1603,7 @@ const CustomRoutingDialog = ({
                     setModel(localModels[0]?.id ?? '');
                   } else if (kind === 'cloud') {
                     setSource({ kind: 'cloud', providerSlug: slug });
-                    setModel('');
+                    setModel(BUILTIN_PROVIDER_DEFAULT_MODELS[slug] ?? '');
                   }
                 }}
                 className="rounded-lg border border-stone-300 dark:border-neutral-700 bg-white dark:bg-neutral-900 px-3 py-2 text-sm text-stone-900 dark:text-neutral-100 focus:border-primary-500 focus:outline-none focus:ring-1 focus:ring-primary-500">
@@ -1624,7 +1636,12 @@ const CustomRoutingDialog = ({
                   type="text"
                   value={model}
                   onChange={e => setModel(e.target.value)}
-                  placeholder={selectedCloud ? `${selectedCloud.slug} model id` : 'model-id'}
+                  placeholder={
+                    selectedCloud
+                      ? (BUILTIN_PROVIDER_DEFAULT_MODELS[selectedCloud.slug] ??
+                        `${selectedCloud.slug} model id`)
+                      : 'model-id'
+                  }
                   className="rounded-lg border border-stone-300 dark:border-neutral-700 bg-white dark:bg-neutral-900 px-3 py-2 text-sm font-mono text-stone-900 dark:text-neutral-100 placeholder-stone-400 dark:placeholder-neutral-500 focus:border-primary-500 focus:outline-none focus:ring-1 focus:ring-primary-500"
                 />
               )}
@@ -1797,8 +1814,8 @@ const AIPanel = ({ embedded = false }: AIPanelProps = {}) => {
             )}
 
             <div className="flex flex-wrap gap-2">
-              {/* Built-in cloud providers — openai/anthropic/openrouter/custom */}
-              {(['openai', 'anthropic', 'openrouter', 'custom'] as const).map(slug => {
+              {/* Built-in cloud providers — openai/anthropic/openrouter/novita/custom */}
+              {BUILTIN_CLOUD_SLUGS.map(slug => {
                 const meta = BUILTIN_PROVIDER_META[slug];
                 const label = meta?.label ?? slug;
                 const existing = draft.cloudProviders.find(cp => cp.slug === slug);
@@ -2112,9 +2129,7 @@ const CloudProviderEditor = ({
   const { t } = useT();
   const defaultSlug: string =
     initial?.slug ??
-    (['openai', 'anthropic', 'openrouter', 'custom'] as const).find(
-      s => !existingSlugs.includes(s)
-    ) ??
+    BUILTIN_CLOUD_SLUGS.find(s => !existingSlugs.includes(s)) ??
     'custom';
   const [slug, setSlug] = useState<string>(defaultSlug);
   const [label, setLabel] = useState<string>(
@@ -2157,7 +2172,7 @@ const CloudProviderEditor = ({
               }}
               disabled={!!initial}
               className="mt-1 w-full rounded-lg border border-stone-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 px-3 py-2 text-sm text-stone-900 dark:text-neutral-100 disabled:opacity-60 focus:border-primary-400 focus:outline-none focus:ring-1 focus:ring-primary-200">
-              {(['openai', 'anthropic', 'openrouter', 'custom'] as const)
+              {BUILTIN_CLOUD_SLUGS
                 .filter(s => s === slug || !existingSlugs.includes(s))
                 .map(s => (
                   <option key={s} value={s}>
@@ -2261,6 +2276,8 @@ function defaultEndpointFor(slug: string): string {
       return 'https://api.anthropic.com/v1';
     case 'openrouter':
       return 'https://openrouter.ai/api/v1';
+    case 'novita':
+      return 'https://api.novita.ai/openai';
     default:
       return '';
   }

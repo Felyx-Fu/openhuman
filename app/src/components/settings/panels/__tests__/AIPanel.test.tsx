@@ -298,6 +298,88 @@ describe('AIPanel', () => {
     expect(screen.getByLabelText(/API key/i)).toBeInTheDocument();
   });
 
+  it('connects Novita AI with the built-in OpenAI-compatible endpoint', async () => {
+    vi.mocked(loadAISettings).mockResolvedValue({ ...baseSettings, cloudProviders: [] });
+    vi.mocked(setCloudProviderKey).mockResolvedValue(undefined);
+    vi.mocked(saveAISettings).mockResolvedValue(undefined);
+
+    renderWithProviders(<AIPanel />);
+    await waitFor(() =>
+      expect(screen.getByRole('switch', { name: /Connect Novita AI/i })).toBeInTheDocument()
+    );
+
+    fireEvent.click(screen.getByRole('switch', { name: /Connect Novita AI/i }));
+    await waitFor(() =>
+      expect(screen.getByRole('dialog', { name: /Connect Novita AI/i })).toBeInTheDocument()
+    );
+
+    fireEvent.change(screen.getByLabelText(/API key/i), {
+      target: { value: 'novita-test-key' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: /^Save$/i }));
+
+    await waitFor(() =>
+      expect(screen.getByRole('switch', { name: /Disconnect Novita AI/i })).toBeInTheDocument()
+    );
+    expect(vi.mocked(setCloudProviderKey)).toHaveBeenCalledWith('novita', 'novita-test-key');
+
+    fireEvent.click(screen.getByRole('button', { name: /^Save$/i }));
+    await waitFor(() => expect(vi.mocked(saveAISettings)).toHaveBeenCalled());
+
+    const [, nextSettings] = vi.mocked(saveAISettings).mock.calls[0];
+    const novitaProvider = nextSettings.cloudProviders.find(
+      (p: { slug: string }) => p.slug === 'novita'
+    );
+    expect(novitaProvider).toMatchObject({
+      slug: 'novita',
+      label: 'Novita AI',
+      endpoint: 'https://api.novita.ai/openai',
+      auth_style: 'bearer',
+      has_api_key: true,
+    });
+  });
+
+  it('prefills the Novita default model when routing a workload to Novita AI', async () => {
+    const settingsWithNovita = {
+      cloudProviders: [
+        {
+          id: 'p_novita_1',
+          slug: 'novita',
+          label: 'Novita AI',
+          endpoint: 'https://api.novita.ai/openai',
+          auth_style: 'bearer' as const,
+          has_api_key: true,
+        },
+      ],
+      routing: baseSettings.routing,
+    };
+    vi.mocked(loadAISettings).mockResolvedValue(settingsWithNovita);
+    vi.mocked(saveAISettings).mockResolvedValue(undefined);
+
+    renderWithProviders(<AIPanel />);
+    await waitFor(() => expect(screen.getAllByText(/Novita AI/i).length).toBeGreaterThan(0));
+
+    const reasoningRow = screen.getByText('Reasoning').parentElement!.parentElement!;
+    fireEvent.click(within(reasoningRow).getAllByRole('button')[1]);
+
+    await waitFor(() =>
+      expect(screen.getByDisplayValue('deepseek/deepseek-v4-pro')).toBeInTheDocument()
+    );
+    const dialog = screen.getByRole('dialog', { name: /Custom routing for Reasoning/i });
+    fireEvent.click(within(dialog).getByRole('button', { name: /^Save$/i }));
+
+    await waitFor(() => expect(screen.getByText(/unsaved change/i)).toBeInTheDocument());
+    fireEvent.click(screen.getByRole('button', { name: /^Save$/i }));
+    await waitFor(() => expect(vi.mocked(saveAISettings)).toHaveBeenCalled());
+
+    const [, nextSettings] = vi.mocked(saveAISettings).mock.calls[0];
+    expect(nextSettings.routing.reasoning).toEqual({
+      kind: 'cloud',
+      providerSlug: 'novita',
+      model: 'deepseek/deepseek-v4-pro',
+    });
+  });
+
   it('clicking the Custom chip (when disabled) opens the CloudProviderEditor, not the key dialog', async () => {
     // Load with no custom provider → chip is off.
     vi.mocked(loadAISettings).mockResolvedValue({ ...baseSettings, cloudProviders: [] });
