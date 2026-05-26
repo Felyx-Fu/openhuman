@@ -215,7 +215,7 @@ mod tests {
     fn build_chat_runtime_defaults_to_openhuman_resolved_model() {
         let cfg = Config::default();
         let (_provider, model) = build_chat_runtime(&cfg).unwrap();
-        assert_eq!(model, "reasoning-v1");
+        assert_eq!(model, DEFAULT_CLOUD_LLM_MODEL);
     }
 
     #[test]
