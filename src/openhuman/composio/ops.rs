@@ -587,12 +587,12 @@ async fn composio_memory_targets_for_connection(
 }
 
 fn gmail_memory_sources_for_connection(connection_id: &str) -> Vec<MemoryCleanupTarget> {
-    dedupe_memory_targets(vec![
+    vec![
         MemoryCleanupTarget::Owner(SourceKind::Email, format!("gmail-sync:{connection_id}")),
         MemoryCleanupTarget::Exact(SourceKind::Email, format!("gmail:{connection_id}")),
         MemoryCleanupTarget::Prefix(SourceKind::Email, format!("gmail:{connection_id}:")),
         MemoryCleanupTarget::Prefix(SourceKind::Email, format!("gmail:{connection_id}/")),
-    ])
+    ]
 }
 
 async fn notion_memory_targets_for_connection(

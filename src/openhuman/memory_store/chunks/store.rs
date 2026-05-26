@@ -35,7 +35,7 @@ use std::sync::{Arc, OnceLock};
 use std::time::{Duration, Instant};
 
 use crate::openhuman::config::Config;
-use crate::openhuman::memory::util::redact;
+use crate::openhuman::memory::util::redact::{self, redact as redact_value};
 use crate::openhuman::memory_store::chunks::types::{Chunk, Metadata, SourceKind, SourceRef};
 use crate::openhuman::memory_store::content::StagedChunk;
 
@@ -846,7 +846,16 @@ fn delete_chunks_by_source_filter(
                 |row| row.get(0),
             )?;
             if remaining == 0 {
+                log::debug!(
+                    "[memory::chunk_store] delete_chunks_by_owner: source_id_hash={} orphaned; removing ingest gate",
+                    redact_value(source_id),
+                );
                 orphaned_deleted_sources.insert(source_id.clone());
+            } else {
+                log::debug!(
+                    "[memory::chunk_store] delete_chunks_by_owner: source_id_hash={} remaining_chunks={remaining}; preserving ingest gate",
+                    redact_value(source_id),
+                );
             }
         }
 
