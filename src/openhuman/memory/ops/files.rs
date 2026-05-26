@@ -200,6 +200,40 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn list_memory_files_skips_internal_sqlite_artifacts() {
+        let _guard = TEST_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let tmp = TempDir::new().expect("tempdir");
+        let _workspace = WorkspaceEnvGuard::set(tmp.path());
+
+        let memory_root = super::super::helpers::resolve_existing_memory_path("")
+            .await
+            .expect("resolve memory root");
+        tokio::fs::write(memory_root.join("memory.db"), "x")
+            .await
+            .expect("write db");
+        tokio::fs::write(memory_root.join("memory.db-shm"), "x")
+            .await
+            .expect("write shm");
+        tokio::fs::write(memory_root.join("memory.db-wal"), "x")
+            .await
+            .expect("write wal");
+        tokio::fs::write(memory_root.join("visible.md"), "ok")
+            .await
+            .expect("write visible");
+
+        let listed = ai_list_memory_files(ListMemoryFilesRequest {
+            relative_dir: String::new(),
+        })
+        .await
+        .expect("list should succeed");
+        let listed_data = listed.value.data.expect("list data");
+        assert_eq!(listed_data.files, vec!["visible.md"]);
+        assert_eq!(listed_data.count, 1);
+    }
+
+    #[tokio::test]
     async fn list_memory_files_rejects_non_directory_target() {
         let _guard = TEST_ENV_LOCK
             .lock()
