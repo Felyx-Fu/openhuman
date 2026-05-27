@@ -731,6 +731,7 @@ pub fn delete_chunks_by_source(
     source_id: &str,
 ) -> Result<usize> {
     delete_chunks_by_source_filter(
+        "delete_chunks_by_source",
         config,
         source_kind,
         |candidate, _owner| candidate == source_id,
@@ -748,6 +749,7 @@ pub fn delete_chunks_by_source_prefix(
     source_id_prefix: &str,
 ) -> Result<usize> {
     delete_chunks_by_source_filter(
+        "delete_chunks_by_source_prefix",
         config,
         source_kind,
         |candidate, _owner| candidate.starts_with(source_id_prefix),
@@ -763,6 +765,7 @@ pub fn delete_chunks_by_owner(
     owner: &str,
 ) -> Result<usize> {
     delete_chunks_by_source_filter(
+        "delete_chunks_by_owner",
         config,
         source_kind,
         |_source_id, candidate_owner| candidate_owner == owner,
@@ -771,6 +774,7 @@ pub fn delete_chunks_by_owner(
 }
 
 fn delete_chunks_by_source_filter(
+    op: &str,
     config: &Config,
     source_kind: SourceKind,
     matches_chunk: impl Fn(&str, &str) -> bool,
@@ -847,13 +851,13 @@ fn delete_chunks_by_source_filter(
             )?;
             if remaining == 0 {
                 log::debug!(
-                    "[memory::chunk_store] delete_chunks_by_owner: source_id_hash={} orphaned; removing ingest gate",
+                    "[memory::chunk_store] {op}: source_id_hash={} orphaned; removing ingest gate",
                     redact_value(source_id),
                 );
                 orphaned_deleted_sources.insert(source_id.clone());
             } else {
                 log::debug!(
-                    "[memory::chunk_store] delete_chunks_by_owner: source_id_hash={} remaining_chunks={remaining}; preserving ingest gate",
+                    "[memory::chunk_store] {op}: source_id_hash={} remaining_chunks={remaining}; preserving ingest gate",
                     redact_value(source_id),
                 );
             }
