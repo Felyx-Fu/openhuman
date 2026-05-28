@@ -579,7 +579,7 @@ impl MemoryCleanupTarget {
                 format!("{}:{source_id_prefix}*", source_kind.as_str())
             }
             Self::Owner(source_kind, owner) => {
-                format!("{} owner:{owner}", source_kind.as_str())
+                format!("{}:owner:{owner}", source_kind.as_str())
             }
         }
     }
