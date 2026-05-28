@@ -128,7 +128,6 @@ jobs:
     if: inputs.run_rust_core
     name: Rust Core Tests (Windows — secrets ACL)
     runs-on: windows-latest
-    timeout-minutes: 30
     timeout-minutes: 35
     env:
       CARGO_INCREMENTAL: '0'
