@@ -412,9 +412,9 @@ mod tests {
         .await
         .expect("list should succeed");
         let listed_data = listed.value.data.expect("list data");
-        // The test only cares about the symlink-skipping invariant — the
-        // listing may also include the SQLite memory store files (`memory.db`,
-        // `memory.db-shm`, `memory.db-wal`) that the test fixture initializes.
+        // This test pins the symlink-skipping invariant; SQLite engine files
+        // (`memory.db`, `memory.db-shm`, `memory.db-wal`) are exercised by
+        // `list_memory_files_skips_internal_sqlite_artifacts` above.
         assert!(
             listed_data.files.iter().any(|f| f == "real.md"),
             "expected real.md in listing, got {:?}",
