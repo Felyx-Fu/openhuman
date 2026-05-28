@@ -761,8 +761,6 @@ fn invalid_models_fail() {
 fn make_openhuman_backend_forwards_unknown_hint_verbatim() {
     // Unrecognised hint:* strings (e.g. hint:reaction for lightweight models)
     // must be forwarded to the backend unchanged. The backend is authoritative
-    // over which hint values it accepts; the factory only translates canonical
-    // hints such as reasoning/chat/agentic/coding/summarization.
     // over which hint values it accepts; the factory only translates the
     // canonical hints (reasoning/chat/agentic/coding/summarization).
     // `hint:summarization` became canonical when `summarization-v1` shipped
