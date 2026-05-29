@@ -2142,15 +2142,20 @@ const CloudProviderEditor = ({
   const editorSlugOptions = CLOUD_EDITOR_SLUGS.includes(slug as (typeof CLOUD_EDITOR_SLUGS)[number])
     ? CLOUD_EDITOR_SLUGS
     : ([slug, ...CLOUD_EDITOR_SLUGS] as const);
+  const dialogLabel = initial
+    ? `${t('settings.ai.editProvider')} ${initial.label}`
+    : t('settings.ai.addCloudProvider');
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-stone-900/30 p-4">
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-label={dialogLabel}
+      className="fixed inset-0 z-50 flex items-center justify-center bg-stone-900/30 p-4">
       <div className="w-full max-w-md rounded-lg border border-stone-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 shadow-float">
         <div className="border-b border-stone-200 dark:border-neutral-800 px-4 py-3">
           <div className="text-sm font-semibold text-stone-900 dark:text-neutral-100">
-            {initial
-              ? `${t('settings.ai.editProvider')} ${initial.label}`
-              : t('settings.ai.addCloudProvider')}
+            {dialogLabel}
           </div>
           <div className="mt-0.5 text-xs text-stone-500 dark:text-neutral-400">
             {t('settings.ai.apiKeysEncrypted')}{' '}
@@ -2279,7 +2284,7 @@ function defaultEndpointFor(slug: string): string {
     case 'openrouter':
       return 'https://openrouter.ai/api/v1';
     case 'novita':
-      return 'https://api.novita.ai/openai';
+      return 'https://api.novita.ai/openai/v1';
     default:
       return '';
   }

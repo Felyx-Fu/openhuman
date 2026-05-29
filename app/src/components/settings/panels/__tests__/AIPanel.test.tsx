@@ -313,9 +313,7 @@ describe('AIPanel', () => {
       expect(screen.getByRole('dialog', { name: /Connect Novita AI/i })).toBeInTheDocument()
     );
 
-    fireEvent.change(screen.getByLabelText(/API key/i), {
-      target: { value: 'novita-test-key' },
-    });
+    fireEvent.change(screen.getByLabelText(/API key/i), { target: { value: 'novita-test-key' } });
     fireEvent.click(screen.getByRole('button', { name: /^Save$/i }));
 
     await waitFor(() =>
@@ -333,7 +331,7 @@ describe('AIPanel', () => {
     expect(novitaProvider).toMatchObject({
       slug: 'novita',
       label: 'Novita AI',
-      endpoint: 'https://api.novita.ai/openai',
+      endpoint: 'https://api.novita.ai/openai/v1',
       auth_style: 'bearer',
       has_api_key: true,
     });
@@ -346,7 +344,7 @@ describe('AIPanel', () => {
           id: 'p_novita_1',
           slug: 'novita',
           label: 'Novita AI',
-          endpoint: 'https://api.novita.ai/openai',
+          endpoint: 'https://api.novita.ai/openai/v1',
           auth_style: 'bearer' as const,
           has_api_key: true,
         },
@@ -436,8 +434,10 @@ describe('AIPanel', () => {
     fireEvent.click(screen.getByRole('switch', { name: /Connect Custom/i }));
 
     await waitFor(() => expect(screen.getByText(/Add cloud provider/i)).toBeInTheDocument());
-    expect(screen.getByDisplayValue('Custom')).toBeInTheDocument();
-    expect(screen.getByPlaceholderText('https://api.example.com/v1')).toHaveValue('');
+    const editor = screen.getByRole('dialog', { name: /Add cloud provider/i });
+    expect(within(editor).getByRole('combobox')).toHaveValue('custom');
+    expect(within(editor).getByPlaceholderText('My Provider')).toHaveValue('Custom');
+    expect(within(editor).getByPlaceholderText('https://api.example.com/v1')).toHaveValue('');
   });
 
   // ─── chip toggle: toggle OFF scrubs routing entries ──────────────────────────
