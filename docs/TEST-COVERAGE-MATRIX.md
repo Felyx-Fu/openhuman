@@ -124,6 +124,7 @@ Canonical mapping of every product feature to its test source(s). Drives gap-fil
 | 3.1.2 | Model Download & Installation | WD    | `local-model-runtime.spec.ts`                            | ✅     |       |
 | 3.1.3 | Model Version Handling        | RU    | `src/openhuman/local_ai/model_ids.rs`                    | ✅     |       |
 | 3.1.4 | LM Studio Model Discovery     | RU+RI | `src/openhuman/local_ai/service/ollama_admin_tests.rs`, `tests/json_rpc_e2e.rs` | ✅ | Uses LM Studio's OpenAI-compatible `/v1/models` surface |
+| 3.1.5 | Model Context-Window Requirement Gate | RU+VU | `src/openhuman/inference/local/model_requirements.rs`, `src/openhuman/inference/local/ollama.rs`, `src/openhuman/inference/local/service/ollama_admin_tests.rs`, `app/src/components/settings/panels/local-model/ModelStatusSection.test.tsx` | ✅ | Rejects Ollama models whose native context window is below the memory-layer minimum (`local_ai.model_context_check`) |
 
 ### 3.2 Runtime Execution
 
@@ -188,6 +189,7 @@ Canonical mapping of every product feature to its test source(s). Drives gap-fil
 | 4.3.1 | Tool Trigger via Chat      | WD    | `skill-execution-flow.spec.ts`, `skill-multi-round.spec.ts` | ✅     |       |
 | 4.3.2 | Permission-Based Execution | RU+WD | `src/openhuman/tools/`, `skill-execution-flow.spec.ts`      | ✅     |       |
 | 4.3.3 | Tool Failure Handling      | WD    | `skill-execution-flow.spec.ts`                              | ✅     |       |
+| 4.3.4 | Subagent Mascot Visualization | VU | `app/src/features/human/SubMascotLayer.test.tsx`, `app/src/features/human/HumanPage.test.tsx` | ✅ | Renders spawned/completed/failed subagent timeline rows as colored companion mascots with activity bubbles |
 
 ---
 
@@ -197,7 +199,7 @@ Canonical mapping of every product feature to its test source(s). Drives gap-fil
 
 | ID    | Feature            | Layer | Test path(s)                                                             | Status | Notes |
 | ----- | ------------------ | ----- | ------------------------------------------------------------------------ | ------ | ----- |
-| 5.1.1 | Screen Capture     | WD+RI | `screen-intelligence.spec.ts`, `tests/screen_intelligence_vision_e2e.rs` | ✅     |       |
+| 5.1.1 | Screen Capture     | RI    | `tests/screen_intelligence_vision_e2e.rs`                                | ✅     |       |
 | 5.1.2 | Context Extraction | RI    | `tests/screen_intelligence_vision_e2e.rs`                                | ✅     |       |
 | 5.1.3 | Memory Injection   | RI    | `tests/memory_graph_sync_e2e.rs`                                         | ✅     |       |
 
@@ -217,6 +219,14 @@ Canonical mapping of every product feature to its test source(s). Drives gap-fil
 | 5.3.2 | Speech-to-Text Processing | WD    | `voice-mode.spec.ts` | ✅     |       |
 | 5.3.3 | Voice Command Execution   | WD    | `voice-mode.spec.ts` | ✅     |       |
 | 5.3.4 | Mascot Voice Selection    | VU    | `app/src/store/__tests__/mascotSlice.test.ts`, `app/src/components/settings/panels/__tests__/VoicePanel.test.tsx`, `app/src/features/human/useHumanMascot.test.ts` (this PR) | ✅ | Slice validation + persist REHYDRATE, Settings picker UI (#1762), `synthesizeSpeech` voiceId override propagation |
+
+### 5.4 Persona
+
+| ID    | Feature                       | Layer | Test path(s)                                                                                                                          | Status | Notes                                                                                              |
+| ----- | ----------------------------- | ----- | ----------------------------------------------------------------------------------------------------------------------------------- | ------ | ------------------------------------------------------------------------------------------------- |
+| 5.4.1 | Persona Name & Description    | VU    | `app/src/store/personaSlice.test.ts`, `app/src/components/settings/panels/PersonaPanel.test.tsx` (this PR)        | ✅     | Slice validation + persist REHYDRATE scrub; Settings identity fields persist on save (#2345)        |
+| 5.4.2 | SOUL.md Edit & Reset          | RU+VU | `src/openhuman/workspace/rpc.rs`, `app/src/components/settings/panels/PersonaPanel.test.tsx` (this PR)                       | ✅     | Core read/write/reset with allowlist + size cap; panel loads, saves, resets over RPC (#2345)        |
+| 5.4.3 | Persona Settings Surface      | VU    | `app/src/components/settings/panels/PersonaPanel.test.tsx` (this PR)                                                        | ✅     | Bundles identity + SOUL.md + link to Mascot avatar/voice (#2345)                                    |
 
 ---
 
@@ -256,6 +266,7 @@ Canonical mapping of every product feature to its test source(s). Drives gap-fil
 | ----- | -------------------- | ----- | ----------------------------------- | ------ | ------------------ |
 | 7.2.1 | HTTP / API Requests  | RU+WD | `service-connectivity-flow.spec.ts` | ✅     |                    |
 | 7.2.2 | Web Search Execution | WD    | `skill-execution-flow.spec.ts`      | 🟡     | Generic skill path |
+| 7.2.3 | TinyFish Integration Tools | RU | `src/openhuman/integrations/tinyfish_tests.rs`, `src/openhuman/tools/ops_tests.rs::all_tools_executes_tinyfish_family_against_fake_backend` | ✅ | Backend-proxied Search, Fetch, and Agent run tools covered with fake backend |
 
 ---
 
@@ -290,6 +301,17 @@ Canonical mapping of every product feature to its test source(s). Drives gap-fil
 | 8.3.7 | Long-Source Exact Leaf Retrieval         | RU    | `src/openhuman/memory/tree/retrieval/benchmarks.rs::bench_long_source_retrieves_exact_leaf` | 🟡     | Embedder required for seal + chunking; test runs in inert mode but assertions are conditional |
 | 8.3.8 | Drill-Down Isolates Children             | RU    | `src/openhuman/memory/tree/retrieval/benchmarks.rs::bench_drill_down_isolates_children` | ✅     | Verifies query_topic does not cross scope boundaries |
 | 8.3.9 | Scale Ingest 20 Sources No Real Data    | RU    | `src/openhuman/memory/tree/retrieval/benchmarks.rs::bench_scale_ingest_20_sources_no_real_data` | ✅     | Verifies retrieval correctness at scale with synthetic data |
+
+### 8.4 Explicit User Preferences (Two-Lane)
+
+| ID    | Feature                                    | Layer | Test path(s)                                                                                                       | Status | Notes                                                                  |
+| ----- | ------------------------------------------ | ----- | ----------------------------------------------------------------------------------------------------------------- | ------ | ---------------------------------------------------------------------- |
+| 8.4.1 | Save Preference (general / situational)    | RU    | `src/openhuman/tools/impl/agent/save_preference_tests.rs`                                                         | ✅     | `save_preference` tool → `user_pref_{general,situational}`, topic-keyed |
+| 8.4.2 | Lane A — Standing Prefs in System Prompt   | RU    | `src/openhuman/learning/prompt_sections.rs`, `src/openhuman/agent/harness/session/turn_tests.rs`                  | ✅     | General prefs rendered into the system prompt at thread start          |
+| 8.4.3 | Lane B — Situational Recall (vector-gated) | RU    | `src/openhuman/memory/store/unified/query_tests.rs::recall_relevant_by_vector_gates_on_similarity`                | ✅     | Per-turn; relevant query injects, unrelated suppresses                 |
+| 8.4.4 | Same-Topic Contradiction (replace)         | RU    | `src/openhuman/tools/impl/agent/save_preference_tests.rs::recategorising_moves_pref_between_namespaces`           | ✅     | `ON CONFLICT REPLACE`; a topic lives in exactly one scope              |
+| 8.4.5 | Cross-Topic Contradiction Surfacing        | RU    | `src/openhuman/tools/impl/agent/save_preference_tests.rs::save_surfaces_related_preference_for_contradiction_check` | ✅   | Related prefs surfaced in the tool result for the chat agent to resolve |
+| 8.4.6 | vector_chunks Model-Signature Recall Guard | RU    | `src/openhuman/memory/store/unified/query_tests.rs::vector_recall_excludes_other_model_signature`                | ✅     | Excludes cross-model vectors; dim-guards legacy rows                   |
 
 ---
 
@@ -330,13 +352,14 @@ Canonical mapping of every product feature to its test source(s). Drives gap-fil
 | 10.1.2 | WhatsApp Connection | WD    | `app/test/e2e/specs/whatsapp-flow.spec.ts` (this PR) | ✅     | Was ❌ |
 | 10.1.3 | Gmail Connection    | WD    | `gmail-flow.spec.ts`                                 | ✅     |        |
 | 10.1.4 | Slack Connection    | WD    | `app/test/e2e/specs/slack-flow.spec.ts` (this PR)    | ✅     | Was ❌ |
+| 10.1.5 | Yuanbao Connection  | RU    | `src/openhuman/channels/providers/yuanbao/` (this PR), `src/openhuman/channels/controllers/ops.rs::tests::connect_yuanbao_*` (this PR), `src/openhuman/channels/runtime/startup.rs::yuanbao_secret_tests` (this PR) | 🟡     | New API-key channel for Tencent Yuanbao. RU covers sign-token preflight (valid/invalid creds, env-override cluster routing), credentials store hydration (incl. stale app_key guard), and WS reconnect/shutdown. No WDIO spec yet — connect-flow UI is rendered via the generic `ChannelSetupModal` already exercised by other channel flow specs. |
 
 ### 10.2 Authentication & Authorization
 
 | ID     | Feature                               | Layer | Test path(s)                                              | Status | Notes                             |
 | ------ | ------------------------------------- | ----- | --------------------------------------------------------- | ------ | --------------------------------- |
 | 10.2.1 | OAuth / API Token Handling            | WD    | `skill-oauth.spec.ts`                                     | ✅     |                                   |
-| 10.2.2 | Scope Selection (Read/Write/Initiate) | WD    | `gmail-flow.spec.ts`, `skill-oauth.spec.ts`               | 🟡     | Multi-scope matrix not exhaustive |
+| 10.2.2 | Scope Selection (Read/Write/Initiate) | WD    | `gmail-flow.spec.ts`, `skill-oauth.spec.ts`, `composio-triggers-flow.spec.ts` | 🟡     | Multi-scope matrix not exhaustive; Gmail trigger OAuth read scope covered |
 | 10.2.3 | Token Storage & Encryption            | RU    | `src/openhuman/encryption/`, `src/openhuman/credentials/` | ✅     |                                   |
 
 ### 10.3 Message Sync & Ingestion
@@ -377,7 +400,7 @@ Canonical mapping of every product feature to its test source(s). Drives gap-fil
 
 | ID     | Feature                | Layer | Test path(s)                                | Status | Notes                            |
 | ------ | ---------------------- | ----- | ------------------------------------------- | ------ | -------------------------------- |
-| 10.7.1 | Integration Disconnect | WD    | `gmail-flow.spec.ts`, `notion-flow.spec.ts` | ✅     |                                  |
+| 10.7.1 | Integration Disconnect | WD    | `gmail-flow.spec.ts`                        | ✅     |                                  |
 | 10.7.2 | Token Revocation       | RU    | `src/openhuman/credentials/`                | ✅     |                                  |
 | 10.7.3 | Re-Authorization Flow  | WD    | `skill-oauth.spec.ts`                       | 🟡     | Re-auth post-revoke not asserted |
 | 10.7.4 | Permission Re-Sync     | WD    | _missing_ — tracked #968                    | ❌     |                                  |
@@ -393,8 +416,11 @@ Canonical mapping of every product feature to its test source(s). Drives gap-fil
 | 11.1.1 | Multi-Source Analysis      | RI    | `tests/memory_graph_sync_e2e.rs`                                                                                    | 🟡     | Frontend trigger untested                                                                 |
 | 11.1.2 | Actionable Item Extraction | VU    | `app/src/components/intelligence/__tests__/utils.test.ts` (this PR)                                                 | ✅     | Was ❌                                                                                    |
 | 11.1.3 | Analyze Trigger            | WD    | `app/test/e2e/specs/insights-dashboard.spec.ts` mounts the route (this PR); explicit analyze-handler invocation TBD | 🟡     | Route mounts and search/filter UI assert — full analyze trigger flow tracked as follow-up |
-| 11.1.4 | MCP stdio server           | RU    | `src/openhuman/mcp_server/`                                                                                         | ✅     | Read-only initialize/tools/list/tools/call plus stdio framing; binary smoke in PR validation |
+| 11.1.4 | MCP server (stdio + HTTP)  | RU    | `src/openhuman/mcp_server/`                                                                                         | ✅     | Stdio framing plus Streamable HTTP/SSE session lifecycle; `McpHttpClient` round-trip tests |
 | 11.1.5 | Global tool registry       | RI    | `src/openhuman/tool_registry/`, `tests/json_rpc_e2e.rs`                                                             | ✅     | Read-only MCP/controller discovery with routes, schemas, version, allowed agents, and health |
+| 11.1.6 | SearXNG MCP search         | RU    | `src/openhuman/integrations/searxng.rs`, `src/openhuman/mcp_server/tools.rs`, `src/openhuman/tools/schemas.rs`      | ✅     | Self-hosted search config, normalized results, MCP argument validation, and mocked HTTP execution |
+| 11.1.7 | Bundled prompt resources   | RU    | `src/openhuman/mcp_server/resources.rs`, `src/openhuman/mcp_server/protocol.rs`                                     | ✅     | `resources/list` catalog + `resources/read` happy path, -32002 unknown URI, -32602 missing param, catalog-mirrors-BUILTINS parity test |
+| 11.1.8 | Resource templates list    | RU    | `src/openhuman/mcp_server/resources.rs`, `src/openhuman/mcp_server/protocol.rs`                                     | ✅     | `resources/templates/list` returns `{resourceTemplates: []}` (static catalog), tolerates unknown/cursor params |
 
 ### 11.2 Insights Dashboard
 
@@ -440,6 +466,7 @@ Canonical mapping of every product feature to its test source(s). Drives gap-fil
 | ------ | ------------------ | ----- | -------------------------------------------------------------------- | ------ | --------------------- |
 | 13.1.1 | Profile Management | VU    | `app/src/components/settings/panels/__tests__/PrivacyPanel.test.tsx` | 🟡     |                       |
 | 13.1.2 | Linked Accounts    | WD    | `auth-access-control.spec.ts`                                        | 🟡     | UI surface unasserted |
+| 13.1.3 | Meet Handoff Prompt-Injection Guard | VU | `app/src/services/__tests__/webviewAccountService.meetPromptInjection.test.ts` (this PR) | ✅ | Was ❌ — guard blocks handoff on hostile transcripts and wraps non-blocked transcripts in `<meeting_transcript source="untrusted_external_audio">` delimiters (#1920) |
 
 ### 13.2 Automation & Channels
 
@@ -470,6 +497,7 @@ Canonical mapping of every product feature to its test source(s). Drives gap-fil
 | 13.5.1 | Clear App Data   | WD    | `app/test/e2e/specs/settings-data-management.spec.ts`   | ✅     | Destructive — confirm-then-reset       |
 | 13.5.2 | Cache Reset      | WD    | `app/test/e2e/specs/settings-data-management.spec.ts`   | ✅     |                                        |
 | 13.5.3 | Full State Reset | WD    | `app/test/e2e/specs/settings-data-management.spec.ts`   | ✅     | Restart-and-verify fresh-install state |
+| 13.5.4 | Migration from another assistant (OpenClaw) | VU+RU | `app/src/components/settings/panels/__tests__/MigrationPanel.test.tsx` (this PR), `src/openhuman/migration/ops.rs` (existing) | ✅ | Was ❌ — UI now wraps the existing `openhuman.migrate_openclaw` RPC with preview-then-apply + confirm. Hermes tracked as follow-up under #1440 (#1440) |
 
 ---
 
@@ -477,11 +505,11 @@ Canonical mapping of every product feature to its test source(s). Drives gap-fil
 
 | Status           | Count                                            |
 | ---------------- | ------------------------------------------------ |
-| ✅ Covered       | 65                                               |
+| ✅ Covered       | 69                                               |
 | 🟡 Partial       | 27                                               |
-| ❌ Missing       | 27                                               |
+| ❌ Missing       | 26                                               |
 | 🚫 Manual smoke  | 11                                               |
-| **Total leaves** | **130 explicit + nested = 201 product features** |
+| **Total leaves** | **134 explicit + nested = 205 product features** |
 
 PR-A delta: 13 leaves moved from ❌ → ✅ via 5 WDIO specs + 2 Vitest + 1 Rust integration test.
 Remaining gaps tracked under sub-issues #965 (process), #966 (docs), #967 (tools), #968 (auth/perm), #969 (settings), #970 (rewards), #971 (manual smoke).

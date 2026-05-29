@@ -223,6 +223,47 @@ describe('<ComposioConnectModal>', () => {
     expect(screen.queryByText('(oxox)')).not.toBeInTheDocument();
   });
 
+  it('passes clearMemory only when the disconnect memory checkbox is selected', async () => {
+    const connection: ComposioConnection = { id: 'ca_xyz', toolkit: 'gmail', status: 'ACTIVE' };
+    vi.mocked(composioApi.deleteConnection).mockResolvedValue({
+      deleted: true,
+      memory_chunks_deleted: 1,
+    });
+
+    render(
+      <ComposioConnectModal toolkit={mockToolkit} connection={connection} onClose={() => {}} />
+    );
+
+    fireEvent.click(screen.getByLabelText(/also delete memory/i));
+    fireEvent.click(screen.getByRole('button', { name: /^Disconnect$/i }));
+
+    await waitFor(() => {
+      expect(composioApi.deleteConnection).toHaveBeenCalledWith('ca_xyz', { clearMemory: true });
+    });
+  });
+
+  it('resets the clear-memory checkbox after a failed disconnect is dismissed', async () => {
+    const connection: ComposioConnection = { id: 'ca_xyz', toolkit: 'gmail', status: 'ACTIVE' };
+    vi.mocked(composioApi.deleteConnection).mockRejectedValueOnce(new Error('backend down'));
+
+    render(
+      <ComposioConnectModal toolkit={mockToolkit} connection={connection} onClose={() => {}} />
+    );
+
+    const checkbox = screen.getByLabelText(/also delete memory/i);
+    fireEvent.click(checkbox);
+    expect(checkbox).toBeChecked();
+
+    fireEvent.click(screen.getByRole('button', { name: /^Disconnect$/i }));
+
+    expect(await screen.findByText(/backend down/i)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /dismiss/i }));
+
+    await waitFor(() => {
+      expect(screen.getByLabelText(/also delete memory/i)).not.toBeChecked();
+    });
+  });
+
   it('shows an expired-auth recovery state with a reconnect CTA', () => {
     const connection: ComposioConnection = {
       id: 'ca_expired',
@@ -292,6 +333,23 @@ describe('<ComposioConnectModal>', () => {
         );
       });
     });
+
+    it('shows the waiting state even when the OS browser opener rejects', async () => {
+      vi.mocked(composioApi.authorize).mockResolvedValue({
+        connectUrl: 'https://hosted.composio.dev/test-token',
+        connectionId: '',
+      });
+      vi.mocked(composioApi.listConnections).mockResolvedValue({ connections: [] });
+      vi.mocked(openUrlModule.openUrl).mockRejectedValueOnce(new Error('opener unavailable'));
+
+      render(<ComposioConnectModal toolkit={mockToolkit} onClose={() => {}} />);
+
+      fireEvent.click(screen.getByRole('button', { name: /Connect Gmail/ }));
+
+      expect(await screen.findByRole('button', { name: /Reopen browser/i })).toBeInTheDocument();
+      expect(screen.getByText(/Waiting for Gmail/i)).toBeInTheDocument();
+      expect(screen.queryByText(/Something went wrong/i)).not.toBeInTheDocument();
+    });
   });
 });
 
@@ -323,7 +381,7 @@ describe('<ComposioConnectModal> — Jira subdomain collection', () => {
     fireEvent.click(connectButton);
 
     await waitFor(() => {
-      expect(screen.getByText(/Please enter your Atlassian subdomain/i)).toBeInTheDocument();
+      expect(screen.getByText(/This field is required/i)).toBeInTheDocument();
     });
   });
 
@@ -349,7 +407,7 @@ describe('<ComposioConnectModal> — Jira subdomain collection', () => {
     fireEvent.click(connectButton);
 
     await waitFor(() => {
-      expect(screen.getByText(/Please enter your Atlassian subdomain/i)).toBeInTheDocument();
+      expect(screen.getByText(/This field is required/i)).toBeInTheDocument();
     });
 
     // Type to clear the error
@@ -446,6 +504,22 @@ describe('<ComposioConnectModal> — needs-subdomain recovery phase', () => {
     });
   });
 
+  it('surfaces Meta rate-limit guidance for Instagram authorize failures', async () => {
+    const instagramToolkit = composioToolkitMeta('instagram');
+    vi.mocked(authorize).mockRejectedValueOnce(
+      new Error('Authorization failed: Backend returned 429 Too Many Requests')
+    );
+
+    render(<ComposioConnectModal toolkit={instagramToolkit} onClose={() => {}} />);
+    fireEvent.click(screen.getByRole('button', { name: /Connect Instagram/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText(/Business or Creator account/i)).toBeInTheDocument();
+      expect(screen.getByText(/HTTP 429/i)).toBeInTheDocument();
+      expect(screen.queryByText(/api.tinyhumans.ai/i)).not.toBeInTheDocument();
+    });
+  });
+
   it('surfaces a sanitized (non-raw) error for unrelated authorization failures', async () => {
     vi.mocked(authorize).mockRejectedValueOnce(
       new Error(
@@ -464,6 +538,115 @@ describe('<ComposioConnectModal> — needs-subdomain recovery phase', () => {
       expect(screen.queryByText(/api.tinyhumans.ai/i)).not.toBeInTheDocument();
       // Raw JSON payload should not be shown
       expect(screen.queryByText(/internal server error payload/i)).not.toBeInTheDocument();
+    });
+  });
+});
+
+// ── Dynamics 365 org_name required-field flow (#2127) ──────────────────
+
+describe('<ComposioConnectModal> — Dynamics 365 org_name collection (#2127)', () => {
+  const dynamicsToolkit = composioToolkitMeta('dynamics365');
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('renders the Dynamics 365 Organization Name input in the idle phase', () => {
+    render(<ComposioConnectModal toolkit={dynamicsToolkit} onClose={() => {}} />);
+
+    expect(screen.getByLabelText(/Dynamics 365 Organization Name/i)).toBeInTheDocument();
+    expect(screen.getByPlaceholderText('myorg')).toBeInTheDocument();
+    // Suffix renders inside the input wrapper so users see the .crm.dynamics.com tail.
+    expect(screen.getByText('.crm.dynamics.com')).toBeInTheDocument();
+  });
+
+  it('blocks submission when org name is empty and surfaces the generic required-field error', async () => {
+    render(<ComposioConnectModal toolkit={dynamicsToolkit} onClose={() => {}} />);
+
+    fireEvent.click(screen.getByRole('button', { name: /Connect Dynamics 365/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText(/This field is required/i)).toBeInTheDocument();
+    });
+    expect(authorize).not.toHaveBeenCalled();
+  });
+
+  it('rejects a full URL with the subdomain-invalid message', async () => {
+    render(<ComposioConnectModal toolkit={dynamicsToolkit} onClose={() => {}} />);
+
+    const input = screen.getByPlaceholderText('myorg');
+    fireEvent.change(input, { target: { value: 'https://myorg.crm.dynamics.com' } });
+    fireEvent.click(screen.getByRole('button', { name: /Connect Dynamics 365/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText(/short subdomain only/i)).toBeInTheDocument();
+    });
+    expect(authorize).not.toHaveBeenCalled();
+  });
+
+  it('forwards the trimmed org_name as extra_params on successful submit', async () => {
+    vi.mocked(authorize).mockResolvedValue({
+      connectUrl: 'https://hosted.composio.dev/dynamics-token',
+      connectionId: 'ca_dyn_1',
+    });
+    vi.mocked(composioApi.listConnections).mockResolvedValue({ connections: [] });
+
+    render(<ComposioConnectModal toolkit={dynamicsToolkit} onClose={() => {}} />);
+
+    fireEvent.change(screen.getByPlaceholderText('myorg'), { target: { value: '  myorg  ' } });
+    fireEvent.click(screen.getByRole('button', { name: /Connect Dynamics 365/i }));
+
+    await waitFor(() => {
+      expect(authorize).toHaveBeenCalledWith('dynamics365', { org_name: 'myorg' });
+    });
+  });
+
+  it('transitions to the needs-fields recovery phase when Composio returns 612', async () => {
+    vi.mocked(authorize).mockRejectedValueOnce(
+      new Error(
+        'Authorization failed: Backend returned 400: {"error":{"slug":"ConnectedAccount_MissingRequiredFields","code":612}}'
+      )
+    );
+
+    render(<ComposioConnectModal toolkit={dynamicsToolkit} onClose={() => {}} />);
+
+    fireEvent.change(screen.getByPlaceholderText('myorg'), { target: { value: 'myorg' } });
+    fireEvent.click(screen.getByRole('button', { name: /Connect Dynamics 365/i }));
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /Retry connection/i })).toBeInTheDocument();
+      expect(screen.getByText(/we need a bit more information/i)).toBeInTheDocument();
+    });
+    expect(screen.queryByText(/ConnectedAccount_MissingRequiredFields/i)).not.toBeInTheDocument();
+  });
+});
+
+// ── WhatsApp WABA id parity check — registry refactor must not regress (#2127) ─
+
+describe('<ComposioConnectModal> — WhatsApp WABA id parity (#2127)', () => {
+  const whatsappToolkit = composioToolkitMeta('whatsapp');
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('still renders the WABA id input and forwards waba_id as extra_params', async () => {
+    vi.mocked(authorize).mockResolvedValue({
+      connectUrl: 'https://hosted.composio.dev/wa-token',
+      connectionId: 'ca_wa_1',
+    });
+    vi.mocked(composioApi.listConnections).mockResolvedValue({ connections: [] });
+
+    render(<ComposioConnectModal toolkit={whatsappToolkit} onClose={() => {}} />);
+
+    expect(screen.getByLabelText(/WhatsApp Business Account ID/i)).toBeInTheDocument();
+    fireEvent.change(screen.getByPlaceholderText(/123456789012345/), {
+      target: { value: '999000111222333' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: /Connect WhatsApp/i }));
+
+    await waitFor(() => {
+      expect(authorize).toHaveBeenCalledWith('whatsapp', { waba_id: '999000111222333' });
     });
   });
 });

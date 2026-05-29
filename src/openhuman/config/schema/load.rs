@@ -54,6 +54,28 @@ impl EnvLookup for ProcessEnv {
     }
 }
 
+/// Process env lookup that preserves every override except
+/// `OPENHUMAN_WORKSPACE`.
+struct ProcessEnvWithoutWorkspace;
+
+impl EnvLookup for ProcessEnvWithoutWorkspace {
+    fn get(&self, key: &str) -> Option<String> {
+        if key == "OPENHUMAN_WORKSPACE" {
+            None
+        } else {
+            ProcessEnv.get(key)
+        }
+    }
+
+    fn contains(&self, key: &str) -> bool {
+        if key == "OPENHUMAN_WORKSPACE" {
+            false
+        } else {
+            ProcessEnv.contains(key)
+        }
+    }
+}
+
 fn default_config_and_workspace_dirs() -> Result<(PathBuf, PathBuf)> {
     let config_dir = default_config_dir()?;
     Ok((config_dir.clone(), config_dir.join("workspace")))
@@ -106,6 +128,28 @@ pub fn default_root_openhuman_dir() -> Result<PathBuf> {
         .map(|u| u.home_dir().to_path_buf())
         .context("Could not find home directory")?;
     Ok(home.join(default_root_dir_name()))
+}
+
+/// Environment override for the agent's default projects directory.
+pub const PROJECTS_DIR_ENV_VAR: &str = "OPENHUMAN_PROJECTS_DIR";
+
+/// The agent's default **projects home** — a visible, read-write directory
+/// (`~/OpenHuman/projects`) where the coding agent creates and saves projects,
+/// kept distinct from the hidden internal state dir (`~/.openhuman/workspace`,
+/// which also holds `memory_tree` etc.). Overridable via `OPENHUMAN_PROJECTS_DIR`;
+/// falls back to `./OpenHuman/projects` only when the home dir can't be resolved.
+pub fn default_projects_dir() -> PathBuf {
+    if let Ok(p) = std::env::var(PROJECTS_DIR_ENV_VAR) {
+        let trimmed = p.trim();
+        if !trimmed.is_empty() {
+            return PathBuf::from(trimmed);
+        }
+    }
+    UserDirs::new()
+        .map(|u| u.home_dir().to_path_buf())
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join("OpenHuman")
+        .join("projects")
 }
 
 fn active_workspace_state_path(default_dir: &Path) -> PathBuf {
@@ -348,29 +392,38 @@ async fn resolve_config_dirs_ignoring_env(
 }
 
 fn decrypt_optional_secret(
-    store: &crate::openhuman::security::SecretStore,
+    store: &crate::openhuman::keyring::SecretStore,
     value: &mut Option<String>,
     field_name: &str,
 ) -> Result<()> {
     if let Some(raw) = value.clone() {
-        if crate::openhuman::security::SecretStore::is_encrypted(&raw) {
-            *value = Some(
-                store
-                    .decrypt(&raw)
-                    .with_context(|| format!("Failed to decrypt {field_name}"))?,
-            );
+        if crate::openhuman::keyring::SecretStore::is_encrypted(&raw) {
+            match store.decrypt(&raw) {
+                Ok(plaintext) => *value = Some(plaintext),
+                Err(e) => {
+                    // Decryption key is inaccessible (e.g. rotated, keyring reset, or
+                    // migrated across machines). Clear the field so config loads
+                    // successfully — the affected integration will be disabled until
+                    // the user re-enters the credential. A hard error here would block
+                    // every config load and make the app unusable.
+                    log::warn!(
+                        "[config] Failed to decrypt {field_name} — field cleared (key inaccessible): {e}"
+                    );
+                    *value = None;
+                }
+            }
         }
     }
     Ok(())
 }
 
 fn encrypt_optional_secret(
-    store: &crate::openhuman::security::SecretStore,
+    store: &crate::openhuman::keyring::SecretStore,
     value: &mut Option<String>,
     field_name: &str,
 ) -> Result<()> {
     if let Some(raw) = value.clone() {
-        if !crate::openhuman::security::SecretStore::is_encrypted(&raw) {
+        if !crate::openhuman::keyring::SecretStore::is_encrypted(&raw) {
             *value = Some(
                 store
                     .encrypt(&raw)
@@ -378,6 +431,219 @@ fn encrypt_optional_secret(
             );
         }
     }
+    Ok(())
+}
+
+/// Decrypt all secret fields in the configuration that are marked as encrypted.
+///
+/// Called during config load when `secrets.encrypt` is true. Only decrypts
+/// values that have the `enc:` or `enc2:` prefix; plaintext values are
+/// returned as-is. This is a no-op when encryption is disabled.
+fn decrypt_config_secrets(config: &mut Config, openhuman_dir: &Path) -> Result<()> {
+    if !config.secrets.encrypt {
+        return Ok(());
+    }
+    let store = crate::openhuman::keyring::SecretStore::new(openhuman_dir, true);
+
+    decrypt_optional_secret(&store, &mut config.api_key, "api_key")?;
+
+    // Search engines: BYO API keys for direct providers.
+    decrypt_optional_secret(
+        &store,
+        &mut config.search.parallel.api_key,
+        "search.parallel.api_key",
+    )?;
+    decrypt_optional_secret(
+        &store,
+        &mut config.search.brave.api_key,
+        "search.brave.api_key",
+    )?;
+    decrypt_optional_secret(
+        &store,
+        &mut config.search.querit.api_key,
+        "search.querit.api_key",
+    )?;
+
+    // Channels: decrypt every optional secret field.
+    //
+    // For required (non-Option<String>) secret fields we wrap the value in a
+    // temporary Option, run `decrypt_optional_secret`, then write back via
+    // `unwrap_or_default`. This mirrors the encrypt path and — crucially —
+    // propagates real decryption errors via `?` instead of silently handing
+    // ciphertext back to channel code on a corrupted `enc2:` value.
+    // Plaintext values (no `enc:`/`enc2:` prefix) are passed through
+    // untouched by `SecretStore::decrypt`, so configs written by pre-#1900
+    // builds continue to load correctly.
+    let ch = &mut config.channels_config;
+    if let Some(ref mut tg) = ch.telegram {
+        let mut tok = Some(tg.bot_token.clone());
+        decrypt_optional_secret(&store, &mut tok, "telegram.bot_token")?;
+        tg.bot_token = tok.unwrap_or_default();
+    }
+    if let Some(ref mut d) = ch.discord {
+        let mut tok = Some(d.bot_token.clone());
+        decrypt_optional_secret(&store, &mut tok, "discord.bot_token")?;
+        d.bot_token = tok.unwrap_or_default();
+    }
+    if let Some(ref mut s) = ch.slack {
+        let mut tok = Some(s.bot_token.clone());
+        decrypt_optional_secret(&store, &mut tok, "slack.bot_token")?;
+        s.bot_token = tok.unwrap_or_default();
+        decrypt_optional_secret(&store, &mut s.app_token, "slack.app_token")?;
+    }
+    if let Some(ref mut m) = ch.mattermost {
+        let mut tok = Some(m.bot_token.clone());
+        decrypt_optional_secret(&store, &mut tok, "mattermost.bot_token")?;
+        m.bot_token = tok.unwrap_or_default();
+    }
+    if let Some(ref mut w) = ch.webhook {
+        decrypt_optional_secret(&store, &mut w.secret, "webhook.secret")?;
+    }
+    if let Some(ref mut mx) = ch.matrix {
+        let mut tok = Some(mx.access_token.clone());
+        decrypt_optional_secret(&store, &mut tok, "matrix.access_token")?;
+        mx.access_token = tok.unwrap_or_default();
+    }
+    if let Some(ref mut wa) = ch.whatsapp {
+        decrypt_optional_secret(&store, &mut wa.access_token, "whatsapp.access_token")?;
+        decrypt_optional_secret(&store, &mut wa.verify_token, "whatsapp.verify_token")?;
+        decrypt_optional_secret(&store, &mut wa.app_secret, "whatsapp.app_secret")?;
+    }
+    if let Some(ref mut lq) = ch.linq {
+        let mut tok = Some(lq.api_token.clone());
+        decrypt_optional_secret(&store, &mut tok, "linq.api_token")?;
+        lq.api_token = tok.unwrap_or_default();
+    }
+    if let Some(ref mut irc) = ch.irc {
+        decrypt_optional_secret(&store, &mut irc.server_password, "irc.server_password")?;
+        decrypt_optional_secret(&store, &mut irc.nickserv_password, "irc.nickserv_password")?;
+        decrypt_optional_secret(&store, &mut irc.sasl_password, "irc.sasl_password")?;
+    }
+    if let Some(ref mut lk) = ch.lark {
+        let mut tok = Some(lk.app_secret.clone());
+        decrypt_optional_secret(&store, &mut tok, "lark.app_secret")?;
+        lk.app_secret = tok.unwrap_or_default();
+        decrypt_optional_secret(&store, &mut lk.encrypt_key, "lark.encrypt_key")?;
+        decrypt_optional_secret(
+            &store,
+            &mut lk.verification_token,
+            "lark.verification_token",
+        )?;
+    }
+    if let Some(ref mut dt) = ch.dingtalk {
+        let mut tok = Some(dt.client_secret.clone());
+        decrypt_optional_secret(&store, &mut tok, "dingtalk.client_secret")?;
+        dt.client_secret = tok.unwrap_or_default();
+    }
+    if let Some(ref mut qq) = ch.qq {
+        let mut tok = Some(qq.app_secret.clone());
+        decrypt_optional_secret(&store, &mut tok, "qq.app_secret")?;
+        qq.app_secret = tok.unwrap_or_default();
+    }
+
+    Ok(())
+}
+
+/// Encrypt all secret fields in the configuration before writing to disk.
+///
+/// Called during `Config::save()` when `secrets.encrypt` is true. Only
+/// encrypts values that are NOT already encrypted. This is a no-op when
+/// encryption is disabled.
+fn encrypt_config_secrets(config: &mut Config) -> Result<()> {
+    if !config.secrets.encrypt {
+        return Ok(());
+    }
+    let parent_dir = config
+        .config_path
+        .parent()
+        .context("Config path must have a parent directory")?;
+    let store = crate::openhuman::keyring::SecretStore::new(parent_dir, true);
+
+    encrypt_optional_secret(&store, &mut config.api_key, "api_key")?;
+
+    encrypt_optional_secret(
+        &store,
+        &mut config.search.parallel.api_key,
+        "search.parallel.api_key",
+    )?;
+    encrypt_optional_secret(
+        &store,
+        &mut config.search.brave.api_key,
+        "search.brave.api_key",
+    )?;
+    encrypt_optional_secret(
+        &store,
+        &mut config.search.querit.api_key,
+        "search.querit.api_key",
+    )?;
+
+    let ch = &mut config.channels_config;
+    if let Some(ref mut tg) = ch.telegram {
+        let mut tok = Some(tg.bot_token.clone());
+        encrypt_optional_secret(&store, &mut tok, "telegram.bot_token")?;
+        tg.bot_token = tok.unwrap_or_default();
+    }
+    if let Some(ref mut d) = ch.discord {
+        let mut tok = Some(d.bot_token.clone());
+        encrypt_optional_secret(&store, &mut tok, "discord.bot_token")?;
+        d.bot_token = tok.unwrap_or_default();
+    }
+    if let Some(ref mut s) = ch.slack {
+        let mut tok = Some(s.bot_token.clone());
+        encrypt_optional_secret(&store, &mut tok, "slack.bot_token")?;
+        s.bot_token = tok.unwrap_or_default();
+        encrypt_optional_secret(&store, &mut s.app_token, "slack.app_token")?;
+    }
+    if let Some(ref mut m) = ch.mattermost {
+        let mut tok = Some(m.bot_token.clone());
+        encrypt_optional_secret(&store, &mut tok, "mattermost.bot_token")?;
+        m.bot_token = tok.unwrap_or_default();
+    }
+    if let Some(ref mut w) = ch.webhook {
+        encrypt_optional_secret(&store, &mut w.secret, "webhook.secret")?;
+    }
+    if let Some(ref mut mx) = ch.matrix {
+        let mut tok = Some(mx.access_token.clone());
+        encrypt_optional_secret(&store, &mut tok, "matrix.access_token")?;
+        mx.access_token = tok.unwrap_or_default();
+    }
+    if let Some(ref mut wa) = ch.whatsapp {
+        encrypt_optional_secret(&store, &mut wa.access_token, "whatsapp.access_token")?;
+        encrypt_optional_secret(&store, &mut wa.verify_token, "whatsapp.verify_token")?;
+        encrypt_optional_secret(&store, &mut wa.app_secret, "whatsapp.app_secret")?;
+    }
+    if let Some(ref mut lq) = ch.linq {
+        let mut tok = Some(lq.api_token.clone());
+        encrypt_optional_secret(&store, &mut tok, "linq.api_token")?;
+        lq.api_token = tok.unwrap_or_default();
+    }
+    if let Some(ref mut irc) = ch.irc {
+        encrypt_optional_secret(&store, &mut irc.server_password, "irc.server_password")?;
+        encrypt_optional_secret(&store, &mut irc.nickserv_password, "irc.nickserv_password")?;
+        encrypt_optional_secret(&store, &mut irc.sasl_password, "irc.sasl_password")?;
+    }
+    if let Some(ref mut lk) = ch.lark {
+        let mut tok = Some(lk.app_secret.clone());
+        encrypt_optional_secret(&store, &mut tok, "lark.app_secret")?;
+        lk.app_secret = tok.unwrap_or_default();
+        encrypt_optional_secret(&store, &mut lk.encrypt_key, "lark.encrypt_key")?;
+        encrypt_optional_secret(
+            &store,
+            &mut lk.verification_token,
+            "lark.verification_token",
+        )?;
+    }
+    if let Some(ref mut dt) = ch.dingtalk {
+        let mut tok = Some(dt.client_secret.clone());
+        encrypt_optional_secret(&store, &mut tok, "dingtalk.client_secret")?;
+        dt.client_secret = tok.unwrap_or_default();
+    }
+    if let Some(ref mut qq) = ch.qq {
+        let mut tok = Some(qq.app_secret.clone());
+        encrypt_optional_secret(&store, &mut tok, "qq.app_secret")?;
+        qq.app_secret = tok.unwrap_or_default();
+    }
+
     Ok(())
 }
 
@@ -456,8 +722,28 @@ pub fn pre_login_user_dir(default_openhuman_dir: &Path) -> PathBuf {
 ///
 /// This is a standalone async function (not a method on Config) so it can be
 /// called from both `load_or_init` and `load_from_default_paths`.
+///
+/// **Why the parse runs via `spawn_blocking`:** `toml::from_str::<Config>`
+/// is a recursive-descent parser whose serde-monomorphised `Visitor`
+/// frames for our deeply-nested `Config` cost several KB each. When this
+/// function is called from the bottom of a deep async tower — e.g.
+/// `composio_list_tools` reloading the config per call (#1710 Wave 4),
+/// reached via `chat → orchestrator → delegate_to_integrations_agent →
+/// sub-agent → composio_*` — running the parse inline on the tokio
+/// worker thread blows the ~2 MB worker stack and aborts the in-process
+/// core with `SIGBUS / KERN_PROTECTION_FAILURE` (see `crahs.log`,
+/// 2026-05-17, and `tests/composio_list_tools_stack_overflow_regression.rs`).
+/// Moving the parse onto the blocking-pool gives it a *fresh* thread
+/// stack with no async tower above it, so the same parser frames easily
+/// fit. (An earlier draft of this fix also fronted
+/// `config::ops::load_config_with_timeout` with a per-process cache to
+/// skip the parse on repeat calls, but it was reverted — the in-process
+/// integration tests in `tests/json_rpc_e2e.rs` reuse workspace paths
+/// and load config mid-mutation, racing the cache. The spawn_blocking
+/// move is sufficient on its own once paired with the Tauri worker
+/// stack bump in `app/src-tauri/src/lib.rs`.)
 async fn parse_config_with_recovery(config_path: &Path, contents: &str) -> (Config, bool) {
-    let parse_err = match toml::from_str::<Config>(contents) {
+    let parse_err = match parse_toml_off_worker(contents.to_string()).await {
         Ok(config) => {
             tracing::debug!(
                 path = %config_path.display(),
@@ -477,7 +763,7 @@ async fn parse_config_with_recovery(config_path: &Path, contents: &str) -> (Conf
             "[config] Config file is corrupted — attempting recovery from backup"
         );
         match fs::read_to_string(&backup_path).await {
-            Ok(bak_contents) => match toml::from_str::<Config>(&bak_contents) {
+            Ok(bak_contents) => match parse_toml_off_worker(bak_contents).await {
                 Ok(bak_config) => {
                     tracing::info!(
                         path = %config_path.display(),
@@ -513,6 +799,22 @@ async fn parse_config_with_recovery(config_path: &Path, contents: &str) -> (Conf
     }
 
     (Config::default(), true)
+}
+
+/// Run `toml::from_str::<Config>` on a blocking-pool thread so the
+/// parser's stack consumption is independent of how deep the calling
+/// async tower is. See [`parse_config_with_recovery`] for the rationale.
+///
+/// Returns the parse error stringified (rather than `toml::de::Error`)
+/// because the rare blocking-pool join failure has no corresponding
+/// typed variant and is only ever surfaced as a log line / corruption
+/// fallback. Callers only need the message.
+async fn parse_toml_off_worker(contents: String) -> Result<Config, String> {
+    match tokio::task::spawn_blocking(move || toml::from_str::<Config>(&contents)).await {
+        Ok(Ok(config)) => Ok(config),
+        Ok(Err(parse_err)) => Err(parse_err.to_string()),
+        Err(join_err) => Err(format!("blocking-pool parse join failed: {join_err}")),
+    }
 }
 
 /// Older builds (#1342) wrote the user's custom OpenAI-compatible URL into
@@ -593,7 +895,7 @@ pub(super) fn redact_url_for_log(raw: &str) -> String {
 /// untouched. Routing fields that already contain a `:` are assumed to be
 /// in the new `<slug>:<model>` form.
 fn migrate_cloud_provider_slugs(config: &mut Config) {
-    use super::cloud_providers::migrate_legacy_fields;
+    use super::cloud_providers::{migrate_legacy_fields, AuthStyle};
 
     // Step 1: migrate every cloud_providers entry in-place.
     for entry in &mut config.cloud_providers {
@@ -610,6 +912,23 @@ fn migrate_cloud_provider_slugs(config: &mut Config) {
         .map(|e| (e.slug.clone(), e.id.clone()))
         .collect();
 
+    let legacy_custom_slug = config
+        .inference_url
+        .as_deref()
+        .map(str::trim)
+        .filter(|url| !url.is_empty() && !looks_like_openhuman_provider_endpoint(url))
+        .and_then(|url| {
+            let normalized = normalize_provider_endpoint(url);
+            config
+                .cloud_providers
+                .iter()
+                .find(|entry| {
+                    !is_openhuman_provider_entry(entry)
+                        && normalize_provider_endpoint(&entry.endpoint) == normalized
+                })
+                .map(|entry| entry.slug.clone())
+        });
+
     // Helper: rewrite a single routing field.
     // Legacy bare strings are: "cloud", "openhuman", "openai", "anthropic",
     // "openrouter", "custom" (no ':').  New strings contain ':'.
@@ -625,7 +944,10 @@ fn migrate_cloud_provider_slugs(config: &mut Config) {
         match raw.as_str() {
             "cloud" => {
                 // "cloud" sentinel: look for the primary or first non-openhuman entry.
-                // If none found, leave as "openhuman".
+                // If a legacy external inference_url exists and primary still points
+                // at OpenHuman, keep routing on that custom provider; that shape was
+                // written by older builds that preserved the endpoint but defaulted
+                // primary_cloud to OpenHuman.
                 let primary_slug = config.primary_cloud.as_deref().and_then(|pid| {
                     config
                         .cloud_providers
@@ -633,18 +955,29 @@ fn migrate_cloud_provider_slugs(config: &mut Config) {
                         .find(|e| e.id == pid)
                         .map(|e| e.slug.clone())
                 });
-                let slug = primary_slug.or_else(|| {
-                    config
-                        .cloud_providers
-                        .iter()
-                        .find(|e| e.slug != "openhuman")
-                        .map(|e| e.slug.clone())
-                });
+                let slug = match primary_slug.as_deref() {
+                    Some("openhuman") => legacy_custom_slug.clone().or(primary_slug),
+                    Some(_) => primary_slug,
+                    None => legacy_custom_slug.clone().or_else(|| {
+                        config
+                            .cloud_providers
+                            .iter()
+                            .find(|entry| !is_openhuman_provider_entry(entry))
+                            .map(|entry| entry.slug.clone())
+                    }),
+                };
                 if let Some(s) = slug {
-                    tracing::info!(
-                        "[config][migrate] rewriting routing 'cloud' → '{s}:' (empty model)"
-                    );
-                    *field = Some(format!("{s}:"));
+                    if s == "openhuman" {
+                        tracing::debug!(
+                            "[config][migrate] rewriting routing 'cloud' → 'openhuman'"
+                        );
+                        *field = Some("openhuman".to_string());
+                    } else {
+                        tracing::info!(
+                            "[config][migrate] rewriting routing 'cloud' → '{s}:' (empty model)"
+                        );
+                        *field = Some(format!("{s}:"));
+                    }
                 } else {
                     tracing::debug!(
                         "[config][migrate] routing 'cloud' with no non-openhuman provider → 'openhuman'"
@@ -681,6 +1014,29 @@ fn migrate_cloud_provider_slugs(config: &mut Config) {
     rewrite(&mut config.heartbeat_provider);
     rewrite(&mut config.learning_provider);
     rewrite(&mut config.subconscious_provider);
+
+    fn normalize_provider_endpoint(url: &str) -> String {
+        url.trim().trim_end_matches('/').to_ascii_lowercase()
+    }
+
+    fn looks_like_openhuman_provider_endpoint(url: &str) -> bool {
+        let lower = url.trim().to_ascii_lowercase();
+        let without_scheme = lower.split("://").nth(1).unwrap_or(&lower);
+        let authority = without_scheme.split('/').next().unwrap_or("");
+        let host = authority.split('@').next_back().unwrap_or(authority);
+        let host_no_port = host.split(':').next().unwrap_or(host);
+        matches!(
+            host_no_port,
+            "api.openhuman.ai" | "api.tinyhumans.ai" | "staging-api.tinyhumans.ai" | "openhuman"
+        ) || host_no_port.ends_with(".openhuman.ai")
+            || host_no_port.ends_with(".tinyhumans.ai")
+    }
+
+    fn is_openhuman_provider_entry(entry: &super::cloud_providers::CloudProviderCreds) -> bool {
+        entry.slug == "openhuman"
+            || matches!(entry.auth_style, AuthStyle::OpenhumanJwt)
+            || looks_like_openhuman_provider_endpoint(&entry.endpoint)
+    }
 }
 
 fn migrate_legacy_autocomplete_disabled_apps(config: &mut Config) {
@@ -774,28 +1130,73 @@ impl Config {
         if config_path.exists() {
             #[cfg(unix)]
             {
-                use std::os::unix::fs::PermissionsExt;
+                use std::{fs::Permissions, os::unix::fs::PermissionsExt};
                 if let Ok(meta) = fs::metadata(&config_path).await {
                     if meta.permissions().mode() & 0o004 != 0 {
                         let warned = WARNED_WORLD_READABLE_CONFIGS
                             .get_or_init(|| Mutex::new(HashSet::new()));
-                        let mut warned_guard = warned.lock().unwrap_or_else(|e| e.into_inner());
-                        if warned_guard.insert(config_path.clone()) {
+                        // Only attempt to fix paths not yet successfully chmod'd.
+                        // Cache is advanced only on success so a persistent
+                        // failure re-warns and re-attempts on every load.
+                        let already_fixed = warned
+                            .lock()
+                            .unwrap_or_else(|e| e.into_inner())
+                            .contains(&config_path);
+                        if !already_fixed {
                             tracing::warn!(
-                                "Config file {:?} is world-readable (mode {:o}). \
-                                 Consider restricting with: chmod 600 {:?}",
+                                "[config] Config file {:?} is world-readable (mode {:o}); \
+                                 auto-fixing to 600",
                                 config_path,
                                 meta.permissions().mode() & 0o777,
-                                config_path,
                             );
+                            match fs::set_permissions(&config_path, Permissions::from_mode(0o600))
+                                .await
+                            {
+                                Ok(()) => {
+                                    warned
+                                        .lock()
+                                        .unwrap_or_else(|e| e.into_inner())
+                                        .insert(config_path.clone());
+                                }
+                                Err(e) => {
+                                    tracing::warn!(
+                                        path = %config_path.display(),
+                                        error = %e,
+                                        "[config] failed to auto-fix config file permissions to 600",
+                                    );
+                                }
+                            }
                         }
                     }
                 }
             }
 
-            let contents = fs::read_to_string(&config_path)
-                .await
-                .context("Failed to read config file")?;
+            // Sentry OPENHUMAN-TAURI-9R (~8k events, Windows): this read can
+            // race the atomic-replace in `Config::save` (temp file →
+            // `fs::rename` over `config_path`). On Windows the in-flight
+            // rename / a transient AV or indexer handle makes the read fail
+            // with ERROR_SHARING_VIOLATION (32) / ERROR_ACCESS_DENIED (5) /
+            // ERROR_DELETE_PENDING (303) even though `config_path.exists()`
+            // just returned true. `inference_status` polls `load_config`
+            // frequently, so each coincidence with a save produced one
+            // "Failed to read config file" event. Retry on the transient
+            // Windows locking codes (the same class `retry_with_backoff_async`
+            // already handles for the auth-profile + team_get_usage paths) so
+            // the read succeeds once the writer releases its handle.
+            // `is_transient_fs_error` is `false` for every non-Windows error
+            // (and for NotFound on Windows), so this is a no-op on
+            // macOS/Linux and never masks a genuinely-unreadable config.
+            let contents = crate::openhuman::util::retry_with_backoff_async(
+                "read config file",
+                5,
+                20,
+                || async {
+                    fs::read_to_string(&config_path).await.with_context(|| {
+                        format!("Failed to read config file: {}", config_path.display())
+                    })
+                },
+            )
+            .await?;
             let (mut config, config_was_corrupted) =
                 parse_config_with_recovery(&config_path, &contents).await;
             config.config_path = config_path.clone();
@@ -850,6 +1251,7 @@ impl Config {
                 "Config loaded"
             );
             crate::openhuman::migrations::run_pending(&mut config).await;
+            decrypt_config_secrets(&mut config, &openhuman_dir)?;
             Ok(config)
         } else {
             // Fresh install: there is no legacy on-disk state, so stamp
@@ -924,6 +1326,53 @@ impl Config {
         config.config_path = config_path;
         config.workspace_dir = workspace_dir;
         config.apply_env_overrides();
+        decrypt_config_secrets(&mut config, &openhuman_dir)?;
+        Ok(config)
+    }
+
+    /// Reload a config from an already-resolved `config.toml` path.
+    ///
+    /// This is for long-lived runtime objects that hold a `Config`
+    /// snapshot and need to observe updates written back to the same
+    /// file. It deliberately bypasses only `OPENHUMAN_WORKSPACE`
+    /// resolution: the caller has already been scoped to a user/workspace,
+    /// and following the process-global workspace env var again can cross
+    /// streams with unrelated tests or runtime tasks that temporarily
+    /// repoint it. Other process env overrides still apply.
+    pub async fn load_from_config_path(config_path: &Path, workspace_dir: &Path) -> Result<Self> {
+        let config_path = config_path.to_path_buf();
+        let workspace_dir = workspace_dir.to_path_buf();
+
+        if !config_path.exists() {
+            let mut config = Config {
+                config_path,
+                workspace_dir,
+                ..Default::default()
+            };
+            config.apply_env_overrides_from(&ProcessEnvWithoutWorkspace);
+            return Ok(config);
+        }
+
+        let raw = fs::read_to_string(&config_path)
+            .await
+            .with_context(|| format!("reading config.toml from {}", config_path.display()))?;
+        let (mut config, config_was_corrupted) =
+            parse_config_with_recovery(&config_path, &raw).await;
+        config.config_path = config_path;
+        config.workspace_dir = workspace_dir;
+        migrate_legacy_autocomplete_disabled_apps(&mut config);
+        migrate_legacy_inference_url(&mut config);
+        migrate_cloud_provider_slugs(&mut config);
+        config.apply_env_overrides_from(&ProcessEnvWithoutWorkspace);
+
+        if config_was_corrupted {
+            tracing::warn!(
+                path = %config.config_path.display(),
+                "[config] Snapshot reload recovered a corrupted config; skipping persistence"
+            );
+        }
+
+        crate::openhuman::migrations::run_pending(&mut config).await;
         Ok(config)
     }
 
@@ -944,6 +1393,14 @@ impl Config {
         }
 
         set_runtime_proxy_config(self.proxy.clone());
+
+        // Push the embedding request budget into its process-global limiter so
+        // every cloud embed (via the shared `OpenAiEmbedding` chokepoint) is
+        // throttled to the configured rate. Kept here, with the proxy commit,
+        // so the pure overlay stays side-effect-free for tests.
+        crate::openhuman::embeddings::rate_limit::set_embedding_rate_limit(
+            self.memory.embedding_rate_limit_per_min,
+        );
     }
 
     /// Pure-ish env overlay: applies overrides read from `env` to `self`.
@@ -956,9 +1413,19 @@ impl Config {
     /// with a [`HashMapEnv`] (see tests) without requiring the
     /// `TEST_ENV_LOCK` or tainting sibling tests.
     pub(crate) fn apply_env_overlay_with<E: EnvLookup + ?Sized>(&mut self, env: &E) {
-        if let Some(model) = env.get_any(&["OPENHUMAN_MODEL", "MODEL"]) {
-            if !model.is_empty() {
-                self.default_model = Some(model);
+        // Only the namespaced `OPENHUMAN_MODEL` is honoured. The bare `MODEL`
+        // env var used to be accepted as an alias but collides with vendor
+        // asset-tag env vars (e.g. Dell OptiPlex sets `MODEL=7080`), which
+        // silently clobbered the LLM model and 400'd every backend call
+        // (Sentry OPENHUMAN-TAURI-J8).
+        if let Some(model) = env.get("OPENHUMAN_MODEL") {
+            // Trim before checking so `OPENHUMAN_MODEL="   "` (a common
+            // shape from shells that pass through an unset-but-declared
+            // variable) doesn't clobber the configured default with a
+            // non-usable value.
+            let trimmed = model.trim();
+            if !trimmed.is_empty() {
+                self.default_model = Some(trimmed.to_string());
             }
         }
 
@@ -975,6 +1442,26 @@ impl Config {
                 if (0.0..=2.0).contains(&temp) {
                     self.default_temperature = temp;
                 }
+            }
+        }
+
+        if let Some(raw) = env.get("OPENHUMAN_MAX_ACTIONS_PER_HOUR") {
+            let trimmed = raw.trim();
+            if !trimmed.is_empty() {
+                match trimmed.parse::<u32>() {
+                    Ok(limit) => self.autonomy.max_actions_per_hour = limit,
+                    Err(_) => tracing::warn!(
+                        value = %raw,
+                        "invalid OPENHUMAN_MAX_ACTIONS_PER_HOUR ignored; expected an unsigned integer"
+                    ),
+                }
+            }
+        }
+
+        if let Some(language) = env.get("OPENHUMAN_OUTPUT_LANGUAGE") {
+            let language = language.trim();
+            if !language.is_empty() {
+                self.output_language = Some(language.to_string());
             }
         }
 
@@ -1004,6 +1491,86 @@ impl Config {
             if let Ok(n) = max.parse::<usize>() {
                 if (1..=20).contains(&n) {
                     self.seltz.max_results = n;
+                }
+            }
+        }
+
+        // SearXNG self-hosted search. Unlike Seltz, this needs no API key;
+        // keep it opt-in because it reaches a user-controlled HTTP endpoint.
+        if let Some(flag) = env.get_any(&["OPENHUMAN_SEARXNG_ENABLED", "SEARXNG_ENABLED"]) {
+            if let Some(enabled) = parse_env_bool("OPENHUMAN_SEARXNG_ENABLED", &flag) {
+                self.searxng.enabled = enabled;
+            }
+        }
+        if let Some(url) = env.get_any(&["OPENHUMAN_SEARXNG_BASE_URL", "SEARXNG_BASE_URL"]) {
+            let url = url.trim();
+            if !url.is_empty() {
+                self.searxng.base_url = url.to_string();
+            }
+        }
+        if let Some(max) = env.get_any(&["OPENHUMAN_SEARXNG_MAX_RESULTS", "SEARXNG_MAX_RESULTS"]) {
+            if let Ok(n) = max.parse::<usize>() {
+                if (1..=50).contains(&n) {
+                    self.searxng.max_results = n;
+                }
+            }
+        }
+        if let Some(language) = env.get_any(&[
+            "OPENHUMAN_SEARXNG_DEFAULT_LANGUAGE",
+            "SEARXNG_DEFAULT_LANGUAGE",
+        ]) {
+            let language = language.trim();
+            if !language.is_empty() {
+                self.searxng.default_language = language.to_string();
+            }
+        }
+        if let Some(timeout_secs) = env.get_any(&[
+            "OPENHUMAN_SEARXNG_TIMEOUT_SECS",
+            "OPENHUMAN_SEARXNG_TIMEOUT_SECONDS",
+            "SEARXNG_TIMEOUT_SECS",
+            "SEARXNG_TIMEOUT_SECONDS",
+        ]) {
+            if let Ok(timeout_secs) = timeout_secs.parse::<u64>() {
+                if timeout_secs > 0 {
+                    self.searxng.timeout_secs = timeout_secs;
+                }
+            }
+        }
+
+        // Unified search engine selector. `OPENHUMAN_SEARCH_ENGINE` picks
+        // the active engine; per-engine API keys auto-route to BYO once set.
+        if let Some(engine) = env.get_any(&["OPENHUMAN_SEARCH_ENGINE", "SEARCH_ENGINE"]) {
+            let engine = engine.trim().to_ascii_lowercase();
+            if !engine.is_empty() {
+                self.search.engine = engine;
+            }
+        }
+        if let Some(key) = env.get_any(&["OPENHUMAN_PARALLEL_API_KEY", "PARALLEL_API_KEY"]) {
+            if !key.trim().is_empty() {
+                self.search.parallel.api_key = Some(key);
+            }
+        }
+        if let Some(key) = env.get_any(&["OPENHUMAN_BRAVE_API_KEY", "BRAVE_API_KEY"]) {
+            if !key.trim().is_empty() {
+                self.search.brave.api_key = Some(key);
+            }
+        }
+        if let Some(key) = env.get_any(&["OPENHUMAN_QUERIT_API_KEY", "QUERIT_API_KEY"]) {
+            if !key.trim().is_empty() {
+                self.search.querit.api_key = Some(key);
+            }
+        }
+        if let Some(max) = env.get_any(&["OPENHUMAN_SEARCH_MAX_RESULTS", "SEARCH_MAX_RESULTS"]) {
+            if let Ok(n) = max.parse::<usize>() {
+                if (1..=20).contains(&n) {
+                    self.search.max_results = n;
+                }
+            }
+        }
+        if let Some(t) = env.get_any(&["OPENHUMAN_SEARCH_TIMEOUT_SECS", "SEARCH_TIMEOUT_SECS"]) {
+            if let Ok(n) = t.parse::<u64>() {
+                if n > 0 {
+                    self.search.timeout_secs = n;
                 }
             }
         }
@@ -1243,6 +1810,14 @@ impl Config {
                 self.learning.tool_memory_capture_enabled = enabled;
             }
         }
+        if let Some(flag) = env.get("OPENHUMAN_LEARNING_EXPLICIT_PREFERENCES_ENABLED") {
+            let normalized = flag.trim().to_ascii_lowercase();
+            match normalized.as_str() {
+                "1" | "true" | "yes" | "on" => self.learning.explicit_preferences_enabled = true,
+                "0" | "false" | "no" | "off" => self.learning.explicit_preferences_enabled = false,
+                _ => {}
+            }
+        }
         if let Some(source) = env.get("OPENHUMAN_LEARNING_REFLECTION_SOURCE") {
             let normalized = source.trim().to_ascii_lowercase();
             match normalized.as_str() {
@@ -1270,6 +1845,28 @@ impl Config {
         if let Some(val) = env.get("OPENHUMAN_LEARNING_MIN_TURN_COMPLEXITY") {
             if let Ok(min) = val.trim().parse::<usize>() {
                 self.learning.min_turn_complexity = min;
+            }
+        }
+        if let Some(flag) = env.get("OPENHUMAN_LEARNING_EPISODIC_CAPTURE_ENABLED") {
+            if let Some(enabled) =
+                parse_env_bool("OPENHUMAN_LEARNING_EPISODIC_CAPTURE_ENABLED", flag.as_str())
+            {
+                self.learning.episodic_capture_enabled = enabled;
+            }
+        }
+        if let Some(flag) = env.get("OPENHUMAN_LEARNING_STM_RECALL_ENABLED") {
+            if let Some(enabled) =
+                parse_env_bool("OPENHUMAN_LEARNING_STM_RECALL_ENABLED", flag.as_str())
+            {
+                self.learning.stm_recall_enabled = enabled;
+            }
+        }
+        if let Some(flag) = env.get("OPENHUMAN_LEARNING_UNIFIED_COMPACTION_ENABLED") {
+            if let Some(enabled) = parse_env_bool(
+                "OPENHUMAN_LEARNING_UNIFIED_COMPACTION_ENABLED",
+                flag.as_str(),
+            ) {
+                self.learning.unified_compaction_enabled = enabled;
             }
         }
 
@@ -1303,6 +1900,15 @@ impl Config {
         if let Ok(flag) = std::env::var("OPENHUMAN_MEMORY_EMBED_STRICT") {
             if let Some(strict) = parse_env_bool("OPENHUMAN_MEMORY_EMBED_STRICT", &flag) {
                 self.memory_tree.embedding_strict = strict;
+            }
+        }
+        // Cloud embedding request budget (requests/min) on `memory.*`. `0`
+        // disables throttling. A blank or non-numeric value leaves the
+        // configured/default budget untouched. Committed to the process-global
+        // limiter in `apply_env_overrides`.
+        if let Some(val) = env.get("OPENHUMAN_MEMORY_EMBED_RATE_LIMIT") {
+            if let Ok(per_min) = val.trim().parse::<u32>() {
+                self.memory.embedding_rate_limit_per_min = per_min;
             }
         }
 
@@ -1570,7 +2176,8 @@ impl Config {
     }
 
     pub async fn save(&self) -> Result<()> {
-        let config_to_save = self.clone();
+        let mut config_to_save = self.clone();
+        encrypt_config_secrets(&mut config_to_save)?;
 
         let toml_str =
             toml::to_string_pretty(&config_to_save).context("Failed to serialize config")?;
@@ -1620,14 +2227,16 @@ impl Config {
             .await
             .unwrap_or(false);
         if had_existing_config {
-            fs::copy(&self.config_path, &backup_path)
-                .await
-                .with_context(|| {
-                    format!(
-                        "Failed to create config backup before atomic replace: {}",
-                        backup_path.display()
-                    )
-                })?;
+            // Copy the encrypted temp file as the backup, NOT the old on-disk
+            // config. The old config may still contain plaintext secrets from
+            // before encryption was wired in (#1900). Using the encrypted
+            // bytes ensures the .bak never leaks plaintext credentials.
+            fs::copy(&temp_path, &backup_path).await.with_context(|| {
+                format!(
+                    "Failed to create config backup before atomic replace: {}",
+                    backup_path.display()
+                )
+            })?;
         }
 
         if let Err(e) = fs::rename(&temp_path, &self.config_path).await {

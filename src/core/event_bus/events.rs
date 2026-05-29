@@ -3,6 +3,27 @@
 //! Events carry full payloads so subscribers have everything they need without
 //! secondary lookups. The broadcast channel clones each event per subscriber,
 //! which is fine — richness beats round-trips.
+//!
+//! ## Workspace-scoped events
+//!
+//! Some events are scoped to a specific workspace directory and must be
+//! validated by subscribers before acting on them.
+//!
+//! **Publisher contract**: when constructing a workspace-scoped event, the
+//! publisher must populate `workspace_dir` with the active workspace path at
+//! event creation time. This is typically available as `ctx.workspace_dir`
+//! on the channel runtime context.
+//!
+//! **Subscriber contract**: subscribers that persist or mutate workspace-
+//! specific data must compare the event's `workspace_dir` against their own
+//! workspace binding and silently drop events that do not match. This prevents
+//! stale in-flight events from a previous workspace from corrupting the newly
+//! active workspace's state when the user switches workspaces (e.g. logs out
+//! and back in) while events are in flight.
+//!
+//! **Current workspace-scoped variants**:
+//! - [`DomainEvent::ChannelMessageReceived`]
+//! - [`DomainEvent::ChannelMessageProcessed`]
 
 /// Top-level domain event. Non-exhaustive so new variants can be added
 /// without breaking existing match arms.
@@ -57,6 +78,28 @@ pub enum DomainEvent {
     },
 
     // ── Memory ──────────────────────────────────────────────────────────
+    /// The configured embedding provider is unreachable or the requested model
+    /// is not installed, so the memory pipeline fell back to an alternative.
+    ///
+    /// Published by `memory_store::factories` (once per process via the
+    /// `OLLAMA_HEALTH_REPORTED` latch) so the UI can surface a user-visible
+    /// warning with an actionable fix hint. The `message` field is a
+    /// pre-formatted human-readable string safe to show in a notification.
+    EmbeddingModelUnhealthy {
+        /// Short provider slug, e.g. `"ollama"`.
+        provider: String,
+        /// The model that was intended but could not be reached / found,
+        /// e.g. `"bge-m3"`.
+        model: String,
+        /// The provider that will serve embeddings for this session instead,
+        /// e.g. `"cloud"`.
+        fallback_provider: String,
+        /// Human-readable explanation with an actionable fix,
+        /// e.g. `"Local embedding model unreachable — falling back to cloud
+        /// embeddings. Run \`ollama pull bge-m3\` to fix."`.
+        message: String,
+    },
+
     /// A memory entry was stored.
     MemoryStored {
         key: String,
@@ -72,6 +115,17 @@ pub enum DomainEvent {
     /// this variant is a hook for future ingestion subscribers to react to pull
     /// requests. See `src/openhuman/memory/ops.rs` for the RPC handlers.
     MemorySyncRequested { channel_id: Option<String> },
+    /// A high-level memory sync orchestration stage changed.
+    ///
+    /// Emitted by the `memory` domain so the frontend can surface progress
+    /// across request → fetch → store → queue → ingest → complete.
+    MemorySyncStageChanged {
+        trigger: String,
+        stage: String,
+        provider: Option<String>,
+        connection_id: Option<String>,
+        detail: Option<String>,
+    },
     /// A memory ingestion job started running on the local extraction LLM.
     /// Ingestion is singleton — this fires once, then a matching
     /// [`Self::MemoryIngestionCompleted`] follows when the job finishes.
@@ -92,10 +146,22 @@ pub enum DomainEvent {
 
     // ── Channels ────────────────────────────────────────────────────────
     /// An inbound channel message from the transport layer, ready for processing.
+    ///
+    /// `sender`, `reply_target`, and `thread_ts` are carried alongside
+    /// `channel` so the agent loop can derive per-sender conversation keys
+    /// the same way `channels::context::conversation_history_key` does for
+    /// other inbound paths — keying on `channel` alone collapses distinct
+    /// senders inside a shared channel into one cached session.
     ChannelInboundMessage {
         event_name: String,
         channel: String,
         message: String,
+        #[doc = "Originating user/account id within the channel. `None` for legacy publishers that don't surface it."]
+        sender: Option<String>,
+        #[doc = "Direct-message peer or group thread the reply should go to. `None` when the channel does not distinguish."]
+        reply_target: Option<String>,
+        #[doc = "Slack/Discord thread anchor when the message is in-thread. `None` for top-level messages."]
+        thread_ts: Option<String>,
         raw_data: serde_json::Value,
     },
     /// A message was received on a channel.
@@ -106,6 +172,10 @@ pub enum DomainEvent {
         reply_target: String,
         content: String,
         thread_ts: Option<String>,
+        /// Workspace directory active when this event was published.
+        /// Subscribers that persist data must reject events whose
+        /// `workspace_dir` does not match their own workspace binding.
+        workspace_dir: std::path::PathBuf,
     },
     /// A channel message was fully processed (LLM response sent or error).
     ChannelMessageProcessed {
@@ -118,6 +188,10 @@ pub enum DomainEvent {
         response: String,
         elapsed_ms: u64,
         success: bool,
+        /// Workspace directory active when this event was published.
+        /// Subscribers that persist data must reject events whose
+        /// `workspace_dir` does not match their own workspace binding.
+        workspace_dir: std::path::PathBuf,
     },
     /// A reaction event was received from a channel transport.
     ChannelReactionReceived {
@@ -200,6 +274,41 @@ pub enum DomainEvent {
         session_id: String,
         success: bool,
         elapsed_ms: u64,
+    },
+
+    // ── Approval ────────────────────────────────────────────────────────
+    /// Agent attempted a tool call that produces an external side
+    /// effect; awaiting user approval. Published by `ApprovalGate`
+    /// before parking the tool-call future. Issue #1339.
+    ApprovalRequested {
+        /// Unique id used to correlate the decision back to the
+        /// parked future.
+        request_id: String,
+        /// Tool name being gated (e.g. `"composio"`, `"pushover"`).
+        tool_name: String,
+        /// Short human-readable summary of the action, redacted of
+        /// PII/secrets/message bodies (counts/shape only).
+        action_summary: String,
+        /// Redacted JSON arguments — also stripped of raw user content.
+        args_redacted: serde_json::Value,
+        /// Session id binding the request to the current core launch
+        /// so stale approvals cannot be replayed after restart.
+        session_id: String,
+        /// Chat thread the gated call belongs to, when the turn originated
+        /// from a chat channel — lets the web channel route a `yes`/`no`
+        /// reply back to this request. `None` for non-chat callers.
+        thread_id: Option<String>,
+        /// Socket.IO client id (room) to surface the approval question to,
+        /// when known. `None` for non-chat callers.
+        client_id: Option<String>,
+    },
+    /// User decided a pending approval. Published by `approval_decide`
+    /// RPC handler after the gate's parked future resolves.
+    ApprovalDecided {
+        request_id: String,
+        tool_name: String,
+        /// `"approve_once"`, `"approve_always_for_tool"`, or `"deny"`.
+        decision: String,
     },
 
     // ── Webhooks ────────────────────────────────────────────────────────
@@ -366,6 +475,31 @@ pub enum DomainEvent {
         routed: bool,
     },
 
+    // ── Device pairing ──────────────────────────────────────────────────
+    /// A mobile device completed the X25519 handshake and is now paired.
+    DevicePaired {
+        channel_id: String,
+        device_pubkey: String,
+        label: Option<String>,
+    },
+    /// A paired device's tunnel session was revoked.
+    DeviceRevoked { channel_id: String },
+    /// The backend tunnel reported the peer (device) came online.
+    DevicePeerOnline { channel_id: String },
+    /// The backend tunnel reported the peer (device) went offline.
+    DevicePeerOffline { channel_id: String },
+    /// An encrypted tunnel frame arrived from the device.
+    DeviceTunnelFrame {
+        channel_id: String,
+        payload_b64: String,
+    },
+    /// The backend acknowledged `tunnel:register` with channel credentials.
+    DeviceTunnelRegistered {
+        channel_id: String,
+        pairing_token: String,
+        session_token: String,
+    },
+
     // ── Memory tree ─────────────────────────────────────────────────────
     /// A document (chat batch, email thread, or standalone document) was
     /// fully canonicalised and its chunks written to the memory tree.
@@ -415,6 +549,53 @@ pub enum DomainEvent {
         rebuilt_at: f64,
     },
 
+    // ── Desktop Companion ──────────────────────────────────────────────
+    /// A desktop companion session was started.
+    CompanionSessionStarted { session_id: String, ttl_secs: u64 },
+    /// The companion transitioned to a new state.
+    CompanionStateChanged {
+        session_id: String,
+        state: String,
+        previous_state: String,
+    },
+    /// A desktop companion session ended.
+    CompanionSessionEnded {
+        session_id: String,
+        reason: String,
+        turn_count: usize,
+    },
+
+    // ── MCP Clients ─────────────────────────────────────────────────────
+    /// A new MCP server was installed from the Smithery registry.
+    McpServerInstalled {
+        server_id: String,
+        qualified_name: String,
+    },
+    /// An MCP server subprocess connected and completed the initialize handshake.
+    McpServerConnected { server_id: String, tool_count: u32 },
+    /// An MCP server subprocess was disconnected or terminated.
+    McpServerDisconnected {
+        server_id: String,
+        reason: Option<String>,
+    },
+    /// An MCP client tool was invoked.
+    McpClientToolExecuted {
+        server_id: String,
+        tool_name: String,
+        success: bool,
+        elapsed_ms: u64,
+    },
+    /// The MCP setup agent asked the user for a secret value. The UI
+    /// subscribes to this and renders a native prompt; on submit it calls
+    /// `openhuman.mcp_setup_submit_secret`. `ref_id` is the opaque handle
+    /// returned to the agent; the raw secret value never traverses this
+    /// event.
+    McpSetupSecretRequested {
+        ref_id: String,
+        key_name: String,
+        prompt: String,
+    },
+
     // ── System lifecycle ────────────────────────────────────────────────
     /// A system component started up.
     SystemStartup { component: String },
@@ -426,6 +607,10 @@ pub enum DomainEvent {
     /// Distinct from [`Self::SystemShutdown`] (per-component shutdown
     /// notification) — this variant asks the running process to exit.
     SystemShutdownRequested { source: String, reason: String },
+    /// The `[autonomy]` block (agent access mode / filesystem permissions) was
+    /// changed at runtime. Live sessions should rebuild their `SecurityPolicy`
+    /// from the persisted config before the next turn.
+    AutonomyConfigChanged,
     /// A component's health status changed.
     HealthChanged {
         component: String,
@@ -460,9 +645,11 @@ impl DomainEvent {
             | Self::SubagentCompleted { .. }
             | Self::SubagentFailed { .. } => "agent",
 
-            Self::MemoryStored { .. }
+            Self::EmbeddingModelUnhealthy { .. }
+            | Self::MemoryStored { .. }
             | Self::MemoryRecalled { .. }
             | Self::MemorySyncRequested { .. }
+            | Self::MemorySyncStageChanged { .. }
             | Self::MemoryIngestionStarted { .. }
             | Self::MemoryIngestionCompleted { .. }
             | Self::DocumentCanonicalized { .. } => "memory",
@@ -511,14 +698,132 @@ impl DomainEvent {
 
             Self::NotificationIngested { .. } | Self::NotificationTriaged { .. } => "notification",
 
+            Self::DevicePaired { .. }
+            | Self::DeviceRevoked { .. }
+            | Self::DevicePeerOnline { .. }
+            | Self::DevicePeerOffline { .. }
+            | Self::DeviceTunnelFrame { .. }
+            | Self::DeviceTunnelRegistered { .. } => "device",
+
+            Self::CompanionSessionStarted { .. }
+            | Self::CompanionStateChanged { .. }
+            | Self::CompanionSessionEnded { .. } => "companion",
+
             Self::SystemStartup { .. }
             | Self::SystemShutdown { .. }
             | Self::SystemRestartRequested { .. }
             | Self::SystemShutdownRequested { .. }
+            | Self::AutonomyConfigChanged
             | Self::HealthChanged { .. }
             | Self::HealthRestarted { .. } => "system",
 
             Self::SessionExpired { .. } => "auth",
+
+            Self::ApprovalRequested { .. } | Self::ApprovalDecided { .. } => "approval",
+
+            Self::McpServerInstalled { .. }
+            | Self::McpServerConnected { .. }
+            | Self::McpServerDisconnected { .. }
+            | Self::McpClientToolExecuted { .. }
+            | Self::McpSetupSecretRequested { .. } => "mcp_client",
+        }
+    }
+
+    /// Stable variant name without payload (avoids Debug format coupling).
+    pub fn variant_name(&self) -> &'static str {
+        match self {
+            Self::AgentTurnStarted { .. } => "AgentTurnStarted",
+            Self::AgentTurnCompleted { .. } => "AgentTurnCompleted",
+            Self::AgentError { .. } => "AgentError",
+            Self::SubagentSpawned { .. } => "SubagentSpawned",
+            Self::SubagentCompleted { .. } => "SubagentCompleted",
+            Self::SubagentFailed { .. } => "SubagentFailed",
+            Self::MemoryStored { .. } => "MemoryStored",
+            Self::MemoryRecalled { .. } => "MemoryRecalled",
+            Self::MemorySyncRequested { .. } => "MemorySyncRequested",
+            Self::MemorySyncStageChanged { .. } => "MemorySyncStageChanged",
+            Self::MemoryIngestionStarted { .. } => "MemoryIngestionStarted",
+            Self::MemoryIngestionCompleted { .. } => "MemoryIngestionCompleted",
+            Self::DocumentCanonicalized { .. } => "DocumentCanonicalized",
+            Self::CacheRebuilt { .. } => "CacheRebuilt",
+            Self::ChannelInboundMessage { .. } => "ChannelInboundMessage",
+            Self::ChannelMessageReceived { .. } => "ChannelMessageReceived",
+            Self::ChannelMessageProcessed { .. } => "ChannelMessageProcessed",
+            Self::ChannelReactionReceived { .. } => "ChannelReactionReceived",
+            Self::ChannelReactionSent { .. } => "ChannelReactionSent",
+            Self::ChannelConnected { .. } => "ChannelConnected",
+            Self::ChannelDisconnected { .. } => "ChannelDisconnected",
+            Self::CronJobTriggered { .. } => "CronJobTriggered",
+            Self::CronJobCompleted { .. } => "CronJobCompleted",
+            Self::CronDeliveryRequested { .. } => "CronDeliveryRequested",
+            Self::ProactiveMessageRequested { .. } => "ProactiveMessageRequested",
+            Self::SkillLoaded { .. } => "SkillLoaded",
+            Self::SkillStopped { .. } => "SkillStopped",
+            Self::SkillStartFailed { .. } => "SkillStartFailed",
+            Self::SkillExecuted { .. } => "SkillExecuted",
+            Self::ToolExecutionStarted { .. } => "ToolExecutionStarted",
+            Self::ToolExecutionCompleted { .. } => "ToolExecutionCompleted",
+            Self::WebhookIncomingRequest { .. } => "WebhookIncomingRequest",
+            Self::WebhookReceived { .. } => "WebhookReceived",
+            Self::WebhookRegistered { .. } => "WebhookRegistered",
+            Self::WebhookUnregistered { .. } => "WebhookUnregistered",
+            Self::WebhookProcessed { .. } => "WebhookProcessed",
+            Self::ComposioTriggerReceived { .. } => "ComposioTriggerReceived",
+            Self::ComposioConnectionCreated { .. } => "ComposioConnectionCreated",
+            Self::ComposioConnectionDeleted { .. } => "ComposioConnectionDeleted",
+            Self::ComposioActionExecuted { .. } => "ComposioActionExecuted",
+            Self::ComposioConfigChanged { .. } => "ComposioConfigChanged",
+            Self::TriggerEvaluated { .. } => "TriggerEvaluated",
+            Self::TriggerEscalated { .. } => "TriggerEscalated",
+            Self::TriggerEscalationFailed { .. } => "TriggerEscalationFailed",
+            Self::TreeSummarizerHourCompleted { .. } => "TreeSummarizerHourCompleted",
+            Self::TreeSummarizerPropagated { .. } => "TreeSummarizerPropagated",
+            Self::TreeSummarizerRebuildCompleted { .. } => "TreeSummarizerRebuildCompleted",
+            Self::NotificationIngested { .. } => "NotificationIngested",
+            Self::NotificationTriaged { .. } => "NotificationTriaged",
+            Self::DevicePaired { .. } => "DevicePaired",
+            Self::DeviceRevoked { .. } => "DeviceRevoked",
+            Self::DevicePeerOnline { .. } => "DevicePeerOnline",
+            Self::DevicePeerOffline { .. } => "DevicePeerOffline",
+            Self::DeviceTunnelFrame { .. } => "DeviceTunnelFrame",
+            Self::DeviceTunnelRegistered { .. } => "DeviceTunnelRegistered",
+            Self::CompanionSessionStarted { .. } => "CompanionSessionStarted",
+            Self::CompanionStateChanged { .. } => "CompanionStateChanged",
+            Self::CompanionSessionEnded { .. } => "CompanionSessionEnded",
+            Self::SystemStartup { .. } => "SystemStartup",
+            Self::SystemShutdown { .. } => "SystemShutdown",
+            Self::SystemRestartRequested { .. } => "SystemRestartRequested",
+            Self::SystemShutdownRequested { .. } => "SystemShutdownRequested",
+            Self::AutonomyConfigChanged => "AutonomyConfigChanged",
+            Self::HealthChanged { .. } => "HealthChanged",
+            Self::HealthRestarted { .. } => "HealthRestarted",
+            Self::SessionExpired { .. } => "SessionExpired",
+            Self::ApprovalRequested { .. } => "ApprovalRequested",
+            Self::ApprovalDecided { .. } => "ApprovalDecided",
+            Self::McpServerInstalled { .. } => "McpServerInstalled",
+            Self::McpServerConnected { .. } => "McpServerConnected",
+            Self::McpServerDisconnected { .. } => "McpServerDisconnected",
+            Self::McpClientToolExecuted { .. } => "McpClientToolExecuted",
+            Self::McpSetupSecretRequested { .. } => "McpSetupSecretRequested",
+            Self::EmbeddingModelUnhealthy { .. } => "EmbeddingModelUnhealthy",
+        }
+    }
+
+    /// Best-effort agent/session hint for display (not all events carry one).
+    pub fn agent_hint(&self) -> Option<&str> {
+        match self {
+            Self::AgentTurnStarted { session_id, .. }
+            | Self::AgentTurnCompleted { session_id, .. }
+            | Self::AgentError { session_id, .. } => Some(session_id.as_str()),
+            Self::SubagentSpawned { agent_id, .. }
+            | Self::SubagentCompleted { agent_id, .. }
+            | Self::SubagentFailed { agent_id, .. } => Some(agent_id.as_str()),
+            Self::ChannelMessageReceived { channel, .. }
+            | Self::ChannelConnected { channel, .. }
+            | Self::ChannelDisconnected { channel, .. } => Some(channel.as_str()),
+            Self::ToolExecutionStarted { tool_name, .. }
+            | Self::ToolExecutionCompleted { tool_name, .. } => Some(tool_name.as_str()),
+            _ => None,
         }
     }
 }

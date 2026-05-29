@@ -59,8 +59,11 @@ async fn store_roundtrip_with_encryption() {
         Some("refresh-123")
     );
 
+    // Under the keychain-backed model (FileBackend in debug builds, real OS
+    // keychain in release), secret fields are stored in the keychain and
+    // omitted from the JSON file entirely. The on-disk JSON must not leak
+    // the plaintext secrets in any form.
     let raw = tokio::fs::read_to_string(store.path()).await.unwrap();
-    assert!(raw.contains("enc2:"));
     assert!(!raw.contains("refresh-123"));
     assert!(!raw.contains("access-123"));
 }
@@ -179,10 +182,17 @@ fn load_drops_profiles_whose_decryption_fails_under_rotated_key() {
     let doomed = AuthProfile::new_token("app-session", "default", "real-jwt-payload".into());
     store.upsert_profile(doomed.clone(), true).unwrap();
 
-    // Manually corrupt the persisted token: rewrite it as a syntactically
-    // valid enc2: hex blob that the *current* key cannot decrypt.
-    // (Easier than rotating the key file because the SecretStore caches
-    // by canonical path.)
+    // Under the keychain-backed model the secret was just stored in the
+    // keychain (FileBackend in debug builds) and not in the JSON file.  To
+    // exercise the legacy enc2: decrypt-failure → drop path that this test
+    // covers, delete the keychain entry so the load falls back to the JSON
+    // decrypt path, then plant a syntactically valid enc2: blob in the JSON
+    // that the current key cannot decrypt.
+    let user_id = user_id_from_state_dir(tmp.path());
+    let keychain_key = format!("{KEYCHAIN_AUTH_PREFIX}{}", doomed.id);
+    crate::openhuman::keyring::delete(&user_id, &keychain_key)
+        .expect("delete keychain entry for test setup");
+
     let path = store.path().to_path_buf();
     let mut data: serde_json::Value =
         serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
@@ -214,6 +224,84 @@ fn load_drops_profiles_whose_decryption_fails_under_rotated_key() {
     // there's nothing to drop on the second pass — same clean state.
     let loaded2 = store.load().unwrap();
     assert!(!loaded2.profiles.contains_key(&profile_id));
+}
+
+/// A persisted profile whose `kind` string is something the current code
+/// doesn't recognise (e.g. legacy "OAuth" written before the kebab-case
+/// rename, or "api_key" written by an older code path) must not poison
+/// the whole load — otherwise *every* profile becomes unreadable and the
+/// user is locked out of all sessions. Drop just the bad entry, matching
+/// the decrypt-failure recovery pattern.
+#[test]
+fn load_drops_profiles_with_unrecognized_kind_instead_of_failing_load() {
+    let tmp = TempDir::new().unwrap();
+    let store = AuthProfilesStore::new(tmp.path(), false);
+
+    // Seed one valid profile so we can verify the rest of the store survives.
+    let good = AuthProfile::new_token("openai", "good", "tok-good".into());
+    let good_id = good.id.clone();
+    store.upsert_profile(good, true).unwrap();
+
+    // Inject two profiles with kinds the current parser rejects:
+    //   - "api_key": observed in Sentry issue #123 (370 events over 14d)
+    //   - "OAuth"  : observed in Sentry issue #2605 (258 events) — the
+    //                pre-kebab-case serialized form
+    let path = store.path().to_path_buf();
+    let mut data: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+    data["profiles"]["legacy:apikey"] = serde_json::json!({
+        "provider": "legacy",
+        "profile_name": "apikey",
+        "kind": "api_key",
+        "token": "raw-token",
+        "metadata": {},
+        "created_at": "2025-01-01T00:00:00Z",
+        "updated_at": "2025-01-01T00:00:00Z",
+    });
+    data["profiles"]["legacy:oauth"] = serde_json::json!({
+        "provider": "legacy",
+        "profile_name": "oauth",
+        "kind": "OAuth",
+        "access_token": "raw-access",
+        "metadata": {},
+        "created_at": "2025-01-01T00:00:00Z",
+        "updated_at": "2025-01-01T00:00:00Z",
+    });
+    data["active_profiles"]["legacy"] = serde_json::Value::String("legacy:apikey".to_string());
+    std::fs::write(&path, serde_json::to_string_pretty(&data).unwrap()).unwrap();
+
+    // The load must succeed — the only failure mode prior to the fix was
+    // bailing the entire load on the first unrecognized kind.
+    let loaded = store
+        .load()
+        .expect("load must succeed by dropping profiles with unrecognized kinds");
+
+    assert!(
+        loaded.profiles.contains_key(&good_id),
+        "the valid profile must survive"
+    );
+    assert!(
+        !loaded.profiles.contains_key("legacy:apikey"),
+        "profile with kind=api_key must be dropped"
+    );
+    assert!(
+        !loaded.profiles.contains_key("legacy:oauth"),
+        "profile with kind=OAuth (legacy casing) must be dropped"
+    );
+    assert!(
+        !loaded
+            .active_profiles
+            .values()
+            .any(|v| v == "legacy:apikey"),
+        "active_profiles pointer to a dropped profile must be cleared"
+    );
+
+    // Subsequent load: file was rewritten without the bad profiles.
+    let reread: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+    assert!(reread["profiles"].get("legacy:apikey").is_none());
+    assert!(reread["profiles"].get("legacy:oauth").is_none());
+    assert!(reread["profiles"].get(&good_id).is_some());
 }
 
 #[test]
@@ -440,6 +528,155 @@ fn acquire_lock_writes_pid_so_future_callers_can_recover() {
         "lock file should embed the owning pid, got {observed:?}"
     );
     assert!(!lock_path.exists(), "guard must remove lock on drop");
+}
+
+/// Sentry "Timed out waiting for auth profile lock" recovery: a lock
+/// file that has been around for longer than `STALE_LOCK_AGE_MS` is
+/// treated as leaked even if its recorded pid is still alive. This
+/// covers the Windows AV / indexer case where `Drop::drop` on the
+/// previous guard could not unlink the file and orphaned it with the
+/// still-alive owner pid inside.
+#[test]
+fn clear_lock_if_stale_reclaims_lock_older_than_threshold_even_with_live_pid() {
+    let tmp = TempDir::new().unwrap();
+    let store = AuthProfilesStore::new(tmp.path(), false);
+
+    let lock_path = tmp.path().join(LOCK_FILENAME);
+    std::fs::write(&lock_path, format!("pid={}\n", std::process::id())).unwrap();
+    // Backdate the lock-file mtime well past STALE_LOCK_AGE_MS.
+    let aged =
+        std::time::SystemTime::now() - std::time::Duration::from_millis(STALE_LOCK_AGE_MS + 5_000);
+    std::fs::OpenOptions::new()
+        .write(true)
+        .open(&lock_path)
+        .expect("reopen lock for set_modified")
+        .set_modified(aged)
+        .expect("backdate lock mtime");
+
+    assert!(
+        store.clear_lock_if_stale(),
+        "an aged lock with a live pid must be reclaimed (leaked-by-failed-unlink case)"
+    );
+    assert!(!lock_path.exists(), "stale lock should have been removed");
+}
+
+#[test]
+fn clear_lock_if_stale_reclaims_aged_malformed_lock() {
+    let tmp = TempDir::new().unwrap();
+    let store = AuthProfilesStore::new(tmp.path(), false);
+
+    let lock_path = tmp.path().join(LOCK_FILENAME);
+    std::fs::write(&lock_path, "garbage without a pid line\n").unwrap();
+    let aged =
+        std::time::SystemTime::now() - std::time::Duration::from_millis(STALE_LOCK_AGE_MS + 5_000);
+    std::fs::OpenOptions::new()
+        .write(true)
+        .open(&lock_path)
+        .expect("reopen lock for set_modified")
+        .set_modified(aged)
+        .expect("backdate lock mtime");
+
+    assert!(
+        store.clear_lock_if_stale(),
+        "an aged malformed lock should be reclaimed"
+    );
+    assert!(!lock_path.exists());
+}
+
+/// Regression (init hang): a pidless lock left by a kill/crash mid-write must
+/// be reclaimed after the short [`MALFORMED_LOCK_GRACE_MS`], NOT held for the
+/// full [`STALE_LOCK_AGE_MS`]. Previously a fresh pidless lock made
+/// `app_state_snapshot` (→ `acquire_lock`) block ~30s, stranding the user on
+/// "Initializing OpenHuman" after a kill+reopen.
+#[test]
+fn clear_lock_if_stale_reclaims_pidless_lock_past_short_grace() {
+    let tmp = TempDir::new().unwrap();
+    let store = AuthProfilesStore::new(tmp.path(), false);
+
+    let lock_path = tmp.path().join(LOCK_FILENAME);
+    std::fs::write(&lock_path, "garbage without a pid line\n").unwrap();
+    // Past the malformed grace but far below the 30s stale-age threshold —
+    // the old code would have left this in place and blocked ~30s.
+    assert!(MALFORMED_LOCK_GRACE_MS + 500 < STALE_LOCK_AGE_MS);
+    let aged = std::time::SystemTime::now()
+        - std::time::Duration::from_millis(MALFORMED_LOCK_GRACE_MS + 500);
+    std::fs::OpenOptions::new()
+        .write(true)
+        .open(&lock_path)
+        .expect("reopen lock for set_modified")
+        .set_modified(aged)
+        .expect("backdate lock mtime");
+
+    assert!(
+        store.clear_lock_if_stale(),
+        "a pidless lock past the short grace should be reclaimed without waiting STALE_LOCK_AGE_MS"
+    );
+    assert!(!lock_path.exists());
+}
+
+#[test]
+fn lock_timeout_allows_fresh_leaked_locks_to_age_into_stale_reclaim() {
+    assert!(
+        LOCK_TIMEOUT_MS > STALE_LOCK_AGE_MS,
+        "lock timeout must outlive stale-lock age so a fresh leaked lock can be reclaimed"
+    );
+    assert!(
+        LOCK_TIMEOUT_MS - STALE_LOCK_AGE_MS >= 1_000,
+        "timeout should leave at least one periodic stale recheck after the threshold"
+    );
+}
+
+/// Sentry OPENHUMAN-TAURI-H8: when `OpenOptions::create_new` fails with
+/// anything other than `AlreadyExists`, the error surfaced to Sentry
+/// must embed the underlying `io::ErrorKind` and `raw_os_error()` so we
+/// can tell which OS code is firing. Drive the wrapping helper directly
+/// with a synthetic `io::Error` so the test is platform-independent and
+/// doesn't depend on filesystem permissions (CI runs as root and bypasses
+/// `chmod`).
+#[test]
+fn annotate_lock_create_failure_embeds_io_kind_and_os_code() {
+    // Use each platform's native permission-denied code so the test exercises
+    // the OS error that real production failures would carry. Rust does map
+    // `from_raw_os_error(13)` to `PermissionDenied` on Windows too, but real
+    // Windows `create_new` failures surface code 5 (ERROR_ACCESS_DENIED), and
+    // running against the native code catches regressions in
+    // `annotate_lock_create_failure`'s handling of the platform-specific
+    // value.
+    #[cfg(windows)]
+    let raw_code = 5; // ERROR_ACCESS_DENIED
+    #[cfg(not(windows))]
+    let raw_code = 13; // EACCES
+
+    let io_err = std::io::Error::from_raw_os_error(raw_code);
+    let wrapped = annotate_lock_create_failure(anyhow::Error::new(io_err));
+    let msg = format!("{wrapped:?}");
+
+    assert!(
+        msg.contains("Failed to create auth profile lock"),
+        "stable top-level message missing: {msg}"
+    );
+    assert!(
+        msg.contains("kind=Some(PermissionDenied)"),
+        "context must include io::ErrorKind for Sentry diagnosis: {msg}"
+    );
+    assert!(
+        msg.contains(&format!("os_code=Some({raw_code})")),
+        "context must include raw OS code for Sentry diagnosis: {msg}"
+    );
+}
+
+/// If somehow the chained error is not an `io::Error`, the wrapper must
+/// still emit the stable top-level message with explicit `None` markers so
+/// the Sentry fingerprint still splits cleanly (and we know to look
+/// upstream for an io::Error that got dropped).
+#[test]
+fn annotate_lock_create_failure_handles_missing_io_error() {
+    let wrapped = annotate_lock_create_failure(anyhow::anyhow!("synthetic"));
+    let msg = format!("{wrapped:?}");
+
+    assert!(msg.contains("Failed to create auth profile lock"), "{msg}");
+    assert!(msg.contains("kind=None"), "{msg}");
+    assert!(msg.contains("os_code=None"), "{msg}");
 }
 
 #[test]

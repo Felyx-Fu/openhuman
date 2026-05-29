@@ -108,15 +108,6 @@ export interface LocalAiTtsResult {
   voice_id: string;
 }
 
-export interface LocalAiChatMessage {
-  role: 'user' | 'assistant' | 'system';
-  content: string;
-}
-
-export interface LocalAiChatResult {
-  result: string;
-}
-
 export interface ReactionDecision {
   should_react: boolean;
   emoji: string | null;
@@ -180,17 +171,42 @@ export type RepairAction =
   | { action: 'start_server'; binary_path: string | null }
   | { action: 'pull_model'; model: string };
 
+/**
+ * Verdict for a model's native context window against the memory-layer
+ * minimum. Mirrors the Rust `ContextEligibility` enum (serde tagged by
+ * `status`). `below_minimum` means the model is rejected for memory-layer
+ * use; `unknown` means the context window could not be determined (not a
+ * hard rejection).
+ */
+export type ModelContextEligibility =
+  | { status: 'ok'; context_length: number }
+  | { status: 'below_minimum'; context_length: number; required: number }
+  | { status: 'unknown'; required: number };
+
+export interface InstalledModelInfo {
+  name: string;
+  size?: number | null;
+  modified_at?: string | null;
+  /** Native context window in tokens, or null when `/api/show` didn't report it. */
+  context_length?: number | null;
+  eligibility?: ModelContextEligibility | null;
+}
+
 export interface LocalAiDiagnostics {
   ollama_running: boolean;
   ollama_base_url: string;
   ollama_binary_path: string | null;
   vision_mode?: string;
-  installed_models: Array<{ name: string; size?: number | null; modified_at?: string | null }>;
+  installed_models: InstalledModelInfo[];
+  /** Memory-layer minimum a model's context window must meet to be accepted. */
+  context_requirement?: { min_context_tokens: number };
   expected: {
     chat_model: string;
     chat_found: boolean;
+    chat_eligibility?: ModelContextEligibility | null;
     embedding_model: string;
     embedding_found: boolean;
+    embedding_eligibility?: ModelContextEligibility | null;
     vision_model: string;
     vision_found: boolean;
   };
@@ -300,19 +316,6 @@ export async function openhumanLocalAiTts(
 }
 
 /**
- * Multi-turn chat completion via the configured inference provider.
- */
-export async function openhumanLocalAiChat(
-  messages: LocalAiChatMessage[],
-  maxTokens?: number
-): Promise<CommandResponse<string>> {
-  return await callCoreRpc<CommandResponse<string>>({
-    method: 'openhuman.inference_chat',
-    params: { messages, max_tokens: maxTokens },
-  });
-}
-
-/**
  * Ask the configured inference provider whether the assistant should react to
  * a user message with an emoji.
  */
@@ -383,5 +386,20 @@ export async function openhumanLocalAiDiagnostics(): Promise<LocalAiDiagnostics>
   return await callCoreRpc<LocalAiDiagnostics>({
     method: 'openhuman.inference_diagnostics',
     params: {},
+  });
+}
+
+export interface OllamaConnectionTestResult {
+  reachable: boolean;
+  error?: string | null;
+  models_count?: number | null;
+}
+
+export async function openhumanLocalAiTestConnection(
+  url: string
+): Promise<OllamaConnectionTestResult> {
+  return await callCoreRpc<OllamaConnectionTestResult>({
+    method: 'openhuman.local_ai_test_connection',
+    params: { url },
   });
 }

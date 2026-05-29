@@ -1,6 +1,7 @@
 use crate::openhuman::config::Config;
 use crate::openhuman::inference::local::ollama::{
-    ns_to_tps, ollama_base_url, OllamaGenerateOptions, OllamaGenerateRequest,
+    ns_to_tps, ollama_base_url, ollama_base_url_from_config, redact_ollama_base_url,
+    OllamaGenerateOptions, OllamaGenerateRequest,
 };
 use crate::openhuman::inference::local::provider::{provider_from_config, LocalAiProvider};
 use crate::openhuman::inference::model_ids;
@@ -8,52 +9,20 @@ use crate::openhuman::inference::parse::sanitize_inline_completion;
 
 use super::LocalAiService;
 
-fn redact_ollama_base_url(raw: &str) -> String {
-    // Strip userinfo, query, and fragment so error payloads + logs don't
-    // leak `user:pass@host` style credentials embedded in the endpoint.
-    reqwest::Url::parse(raw)
-        .map(|mut url| {
-            let _ = url.set_username("");
-            let _ = url.set_password(None);
-            url.set_query(None);
-            url.set_fragment(None);
-            url.to_string()
-        })
-        .unwrap_or_else(|_| "<invalid-endpoint>".to_string())
-}
-
-fn external_ollama_request_error(prefix: &str, error: &reqwest::Error) -> String {
-    let safe_base_url = redact_ollama_base_url(&ollama_base_url());
+fn external_ollama_request_error_with_url(
+    prefix: &str,
+    error: &reqwest::Error,
+    base_url: &str,
+) -> String {
+    let safe_base_url = redact_ollama_base_url(base_url);
     format!(
         "{prefix}: OpenHuman routes inference through an external Ollama endpoint. \
          Make sure Ollama is already running and reachable at {safe_base_url} ({error})"
     )
 }
 
-#[cfg(test)]
-mod redact_tests {
-    use super::redact_ollama_base_url;
-
-    #[test]
-    fn redact_strips_userinfo_query_and_fragment() {
-        assert_eq!(
-            redact_ollama_base_url("http://user:pass@host:11434/api?token=abc#frag"),
-            "http://host:11434/api"
-        );
-    }
-
-    #[test]
-    fn redact_keeps_plain_url() {
-        assert_eq!(
-            redact_ollama_base_url("http://127.0.0.1:11434/"),
-            "http://127.0.0.1:11434/"
-        );
-    }
-
-    #[test]
-    fn redact_handles_invalid_url() {
-        assert_eq!(redact_ollama_base_url("not a url"), "<invalid-endpoint>");
-    }
+fn external_ollama_request_error(prefix: &str, error: &reqwest::Error) -> String {
+    external_ollama_request_error_with_url(prefix, error, &ollama_base_url())
 }
 
 impl LocalAiService {
@@ -94,6 +63,26 @@ impl LocalAiService {
             .await
     }
 
+    pub async fn prompt_interactive(
+        &self,
+        config: &Config,
+        prompt: &str,
+        max_tokens: Option<u32>,
+        no_think: bool,
+    ) -> Result<String, String> {
+        log::trace!("[local_ai] prompt_interactive bypasses scheduler_gate permit");
+        if !config.local_ai.runtime_enabled {
+            return Err("local ai is disabled".to_string());
+        }
+        let system = if no_think {
+            "You are a concise assistant. Return only the final answer. Do not include reasoning or chain-of-thought."
+        } else {
+            "You are a helpful assistant."
+        };
+        self.inference_interactive(config, system, prompt, max_tokens.or(Some(160)), no_think)
+            .await
+    }
+
     pub async fn inline_complete(
         &self,
         config: &Config,
@@ -125,9 +114,11 @@ impl LocalAiService {
     /// turn against it than show stale or empty completions for the
     /// duration of the backfill.
     ///
-    /// This is the only path inside [`LocalAiService`] that opts out of
-    /// the gate. Every other entry point (`inference`, `prompt`,
-    /// `summarize`, `inline_complete`, `vision_prompt`, `embed`)
+    /// Along with [`Self::prompt_interactive`] and
+    /// [`Self::chat_with_history_interactive`], this is one of the paths
+    /// inside [`LocalAiService`] that opts out of the gate. Every other
+    /// entry point (`inference`, `prompt`, `summarize`,
+    /// `inline_complete`, `vision_prompt`, `embed`, `chat_with_history`)
     /// acquires before talking to Ollama.
     pub async fn inline_complete_interactive(
         &self,
@@ -225,6 +216,28 @@ impl LocalAiService {
         messages: Vec<crate::openhuman::inference::local::ollama::OllamaChatMessage>,
         max_tokens: Option<u32>,
     ) -> Result<String, String> {
+        self.chat_with_history_internal(config, messages, max_tokens, true)
+            .await
+    }
+
+    pub(crate) async fn chat_with_history_interactive(
+        &self,
+        config: &Config,
+        messages: Vec<crate::openhuman::inference::local::ollama::OllamaChatMessage>,
+        max_tokens: Option<u32>,
+    ) -> Result<String, String> {
+        log::trace!("[local_ai] chat_with_history_interactive bypasses scheduler_gate permit");
+        self.chat_with_history_internal(config, messages, max_tokens, false)
+            .await
+    }
+
+    async fn chat_with_history_internal(
+        &self,
+        config: &Config,
+        messages: Vec<crate::openhuman::inference::local::ollama::OllamaChatMessage>,
+        max_tokens: Option<u32>,
+        gated: bool,
+    ) -> Result<String, String> {
         if !config.local_ai.runtime_enabled {
             return Err("local ai is disabled".to_string());
         }
@@ -237,8 +250,11 @@ impl LocalAiService {
             return Err("messages must not be empty".to_string());
         }
 
-        // Multi-turn local chat is background LLM-bound work — gate it.
-        let _gate_permit = crate::openhuman::scheduler_gate::wait_for_capacity().await;
+        let _gate_permit = if gated {
+            crate::openhuman::scheduler_gate::wait_for_capacity().await
+        } else {
+            None
+        };
 
         if provider_from_config(config) == LocalAiProvider::LmStudio {
             let started = std::time::Instant::now();
@@ -301,13 +317,16 @@ impl LocalAiService {
             ),
         };
 
+        let base_url = ollama_base_url_from_config(config);
         let response = self
             .http
-            .post(format!("{}/api/chat", ollama_base_url()))
+            .post(format!("{base_url}/api/chat"))
             .json(&body)
             .send()
             .await
-            .map_err(|e| external_ollama_request_error("ollama chat request failed", &e))?;
+            .map_err(|e| {
+                external_ollama_request_error_with_url("ollama chat request failed", &e, &base_url)
+            })?;
 
         if !response.status().is_success() {
             let status = response.status();
@@ -551,13 +570,20 @@ impl LocalAiService {
             }),
         };
 
+        let base_url = ollama_base_url_from_config(config);
+        log::debug!(
+            "[local_ai:infer] inference_with_temperature_internal: using base_url={}",
+            redact_ollama_base_url(&base_url)
+        );
         let response = self
             .http
-            .post(format!("{}/api/generate", ollama_base_url()))
+            .post(format!("{base_url}/api/generate"))
             .json(&body)
             .send()
             .await
-            .map_err(|e| external_ollama_request_error("ollama request failed", &e))?;
+            .map_err(|e| {
+                external_ollama_request_error_with_url("ollama request failed", &e, &base_url)
+            })?;
         if !response.status().is_success() {
             let status = response.status();
             let body = response.text().await.unwrap_or_default();

@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useState } from 'react';
+import createDebug from 'debug';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 
 import ConnectionIndicator from '../components/ConnectionIndicator';
@@ -14,8 +15,12 @@ import { useUser } from '../hooks/useUser';
 import { useT } from '../lib/i18n/I18nContext';
 import { restartCoreProcess } from '../services/coreProcessControl';
 import { selectBlockingState } from '../store/connectivitySelectors';
-import { useAppSelector } from '../store/hooks';
+import { useAppDispatch, useAppSelector } from '../store/hooks';
+import { resolveTheme, setThemeMode, type ThemeMode } from '../store/themeSlice';
 import { APP_VERSION } from '../utils/config';
+import { openhumanCronList } from '../utils/tauriCommands';
+
+const homeLog = createDebug('app:home');
 
 export function resolveHomeUserName(user: unknown): string {
   if (!user || typeof user !== 'object') return 'User';
@@ -44,7 +49,7 @@ const Home = () => {
   const { t } = useT();
   const { user } = useUser();
   const navigate = useNavigate();
-  const { isRateLimited, shouldShowBudgetCompletedMessage } = useUsageState();
+  const { shouldShowBudgetCompletedMessage } = useUsageState();
   const _userName = resolveHomeUserName(user);
   const userName = _userName.split(' ')[0]; // Get first name only
   const promoCredits = user?.usage?.promotionBalanceUsd ?? 0;
@@ -75,6 +80,29 @@ const Home = () => {
   const blocking = useAppSelector(selectBlockingState);
   const [isRestartingCore, setIsRestartingCore] = useState(false);
   const [restartError, setRestartError] = useState<string | null>(null);
+
+  // Routine count for the card on home.
+  const [activeRoutineCount, setActiveRoutineCount] = useState<number | null>(null);
+  const loadRoutineCount = useCallback(async () => {
+    try {
+      const response = await openhumanCronList();
+      const activeCount = response.result.filter(j => j.enabled).length;
+      setActiveRoutineCount(activeCount);
+    } catch (err) {
+      homeLog('failed to load routine count', err);
+    }
+  }, []);
+  useEffect(() => {
+    void loadRoutineCount();
+  }, [loadRoutineCount]);
+
+  const dispatch = useAppDispatch();
+  const themeMode = useAppSelector(state => state.theme.mode) as ThemeMode;
+  const resolvedTheme = resolveTheme(themeMode);
+  const isDark = resolvedTheme === 'dark';
+  const toggleTheme = () => {
+    dispatch(setThemeMode(isDark ? 'light' : 'dark'));
+  };
 
   const handleRestartCore = async () => {
     setIsRestartingCore(true);
@@ -139,23 +167,13 @@ const Home = () => {
   return (
     <div className="min-h-full flex flex-col items-center justify-center p-4">
       <div className="max-w-md w-full">
-        {isRateLimited && (
-          <UsageLimitBanner
-            tone="warning"
-            icon="⏳"
-            title="You’ve Hit Your Limits"
-            message="You’ve reached your short-term usage cap. Buy top-up credits to keep going right away."
-            ctaLabel="Buy top-up credits"
-          />
-        )}
-
-        {!isRateLimited && shouldShowBudgetCompletedMessage && (
+        {shouldShowBudgetCompletedMessage && (
           <UsageLimitBanner
             tone="danger"
             icon="⚠️"
-            title="You’ve Exhausted Your Usage"
-            message="You’re out of included usage for now. Start a subscription to unlock more ongoing capacity."
-            ctaLabel="Get a subscription"
+            title={t('home.usageExhaustedTitle')}
+            message={t('home.usageExhaustedBody')}
+            ctaLabel={t('home.usageExhaustedCta')}
           />
         )}
 
@@ -165,11 +183,50 @@ const Home = () => {
         <div
           data-walkthrough="home-card"
           className="bg-white dark:bg-neutral-900 rounded-2xl shadow-soft border border-stone-200 dark:border-neutral-800 p-6 animate-fade-up">
-          {/* Header row: logo + version + settings */}
-          <div className="flex items-center justify-center mb-4">
+          {/* Header row: version centered, theme toggle right-aligned.
+              The empty left spacer matches the toggle's width so the version
+              stays visually centered. */}
+          <div className="flex items-center justify-between mb-4">
+            <div className="w-9" aria-hidden="true" />
             <span className="text-xs text-center text-stone-400 dark:text-neutral-500">
               v{APP_VERSION}
             </span>
+            <button
+              type="button"
+              onClick={toggleTheme}
+              aria-label={isDark ? t('home.themeToggle.toLight') : t('home.themeToggle.toDark')}
+              title={isDark ? t('home.themeToggle.toLight') : t('home.themeToggle.toDark')}
+              className="p-2 rounded-full text-stone-500 dark:text-neutral-400 hover:text-stone-700 dark:hover:text-neutral-200 hover:bg-stone-100 dark:hover:bg-neutral-800/60 transition-colors">
+              {isDark ? (
+                <svg
+                  className="w-5 h-5"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth={2}
+                  viewBox="0 0 24 24"
+                  aria-hidden="true">
+                  <circle cx="12" cy="12" r="4" />
+                  <path
+                    strokeLinecap="round"
+                    d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"
+                  />
+                </svg>
+              ) : (
+                <svg
+                  className="w-5 h-5"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth={2}
+                  viewBox="0 0 24 24"
+                  aria-hidden="true">
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79Z"
+                  />
+                </svg>
+              )}
+            </button>
           </div>
 
           {/* Welcome title */}
@@ -218,6 +275,45 @@ const Home = () => {
             {t('home.askAssistant')}
           </button>
         </div>
+
+        {/* Routines card */}
+        {activeRoutineCount !== null && (
+          <button
+            onClick={() => navigate('/routines')}
+            className="mt-3 w-full bg-white dark:bg-neutral-900 rounded-2xl shadow-soft border border-stone-200 dark:border-neutral-800 p-4 flex items-center gap-3 text-left hover:border-primary-300 dark:hover:border-primary-500/40 transition-colors animate-fade-up">
+            <div className="w-9 h-9 rounded-full bg-primary-50 dark:bg-primary-500/10 flex items-center justify-center flex-shrink-0">
+              <svg
+                className="w-4.5 h-4.5 text-primary-500"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24">
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={1.8}
+                  d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"
+                />
+              </svg>
+            </div>
+            <div className="flex-1 min-w-0">
+              <div className="text-sm font-medium text-stone-900 dark:text-neutral-100">
+                {t('home.routinesCard')}
+              </div>
+              <div className="text-xs text-stone-500 dark:text-neutral-400">
+                {activeRoutineCount > 0
+                  ? t('home.routinesActive').replace('{count}', String(activeRoutineCount))
+                  : t('routines.emptyHint')}
+              </div>
+            </div>
+            <svg
+              className="w-4 h-4 text-stone-400 dark:text-neutral-500 flex-shrink-0"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+            </svg>
+          </button>
+        )}
 
         {showEarlyBirdy && <EarlyBirdyBanner onDismiss={handleDismissEarlyBirdy} />}
 

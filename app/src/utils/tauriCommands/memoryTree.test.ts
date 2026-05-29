@@ -8,6 +8,7 @@ import { beforeEach, describe, expect, type Mock, test, vi } from 'vitest';
 
 import { callCoreRpc } from '../../services/coreRpcClient';
 import {
+  memoryTreeBackfillStatus,
   memoryTreeChunkScore,
   memoryTreeDeleteChunk,
   memoryTreeEntityIndexFor,
@@ -16,6 +17,7 @@ import {
   memoryTreeGraphExport,
   memoryTreeListChunks,
   memoryTreeListSources,
+  memoryTreeObsidianVaultStatus,
   memoryTreeRecall,
   memoryTreeResetTree,
   memoryTreeSearch,
@@ -353,5 +355,67 @@ describe('memoryTreeGraphExport', () => {
     });
     expect(out.nodes).toHaveLength(1);
     expect(out.edges).toHaveLength(1);
+  });
+});
+
+describe('memoryTreeBackfillStatus', () => {
+  test('dispatches openhuman.memory_tree_memory_backfill_status and unwraps', async () => {
+    mockCallCoreRpc.mockResolvedValueOnce({
+      result: { in_progress: true, pending_jobs: 3 },
+      logs: ['memory_tree: backfill_status in_progress=true pending=3'],
+    });
+
+    const out = await memoryTreeBackfillStatus();
+
+    expect(mockCallCoreRpc).toHaveBeenCalledWith({
+      method: 'openhuman.memory_tree_memory_backfill_status',
+    });
+    expect(out.in_progress).toBe(true);
+    expect(out.pending_jobs).toBe(3);
+  });
+
+  test('handles bare-value responses (no logs envelope)', async () => {
+    mockCallCoreRpc.mockResolvedValueOnce({ in_progress: false, pending_jobs: 0 });
+    const out = await memoryTreeBackfillStatus();
+    expect(out.in_progress).toBe(false);
+    expect(out.pending_jobs).toBe(0);
+  });
+});
+
+describe('memoryTreeObsidianVaultStatus', () => {
+  test('dispatches with the config-dir override when one is provided', async () => {
+    mockCallCoreRpc.mockResolvedValueOnce({
+      result: {
+        registered: false,
+        config_found: true,
+        content_root_abs: '/ws/memory_tree/content',
+      },
+      logs: ['memory_tree::read: obsidian_vault_status registered=false config_found=true'],
+    });
+
+    const out = await memoryTreeObsidianVaultStatus('/custom/obsidian');
+
+    expect(mockCallCoreRpc).toHaveBeenCalledWith({
+      method: 'openhuman.memory_tree_obsidian_vault_status',
+      params: { obsidian_config_dir: '/custom/obsidian' },
+    });
+    expect(out.registered).toBe(false);
+    expect(out.config_found).toBe(true);
+  });
+
+  test('omits the override param and unwraps a bare-value response', async () => {
+    mockCallCoreRpc.mockResolvedValueOnce({
+      registered: true,
+      config_found: true,
+      content_root_abs: '/ws/memory_tree/content',
+    });
+
+    const out = await memoryTreeObsidianVaultStatus();
+
+    expect(mockCallCoreRpc).toHaveBeenCalledWith({
+      method: 'openhuman.memory_tree_obsidian_vault_status',
+      params: {},
+    });
+    expect(out.registered).toBe(true);
   });
 });

@@ -1,5 +1,5 @@
-use crate::openhuman::security::SecurityPolicy;
-use crate::openhuman::tools::traits::{Tool, ToolResult};
+use crate::openhuman::security::{CommandClass, GateDecision, SecurityPolicy};
+use crate::openhuman::tools::traits::{PermissionLevel, Tool, ToolResult};
 use async_trait::async_trait;
 use serde_json::json;
 use std::sync::Arc;
@@ -42,6 +42,41 @@ impl Tool for FileWriteTool {
         })
     }
 
+    fn permission_level(&self) -> PermissionLevel {
+        PermissionLevel::Write
+    }
+
+    /// "Ask before edit": modifying an **existing** file routes through the
+    /// human approval gate in ask-before-edit mode; creating a **new** file is
+    /// free. In Full neither prompts; in read-only `execute` blocks via
+    /// `can_act()`. The existence probe is best-effort (relative to the
+    /// workspace); when the path can't be resolved we fail safe and prompt.
+    ///
+    /// The probe runs at gate-routing time, microseconds before `execute()` in
+    /// the same sequential turn. A create→edit flip in that window would require
+    /// an external process to win the race — outside this gate's threat model,
+    /// which governs the agent, not concurrent writers — and `execute()` still
+    /// enforces workspace containment + symlink refusal regardless, so a write
+    /// that slips through as "create" cannot escape the sandbox. We therefore
+    /// do not re-probe in `execute()`.
+    fn external_effect_with_args(&self, args: &serde_json::Value) -> bool {
+        if self.security.gate_decision(CommandClass::Write) != GateDecision::Prompt {
+            return false; // Full (allow) or read-only (blocked in execute)
+        }
+        let Some(path) = args.get("path").and_then(|v| v.as_str()) else {
+            return true; // unknown path → prompt (fail safe)
+        };
+        let target = if std::path::Path::new(path).is_absolute() {
+            std::path::PathBuf::from(path)
+        } else {
+            self.security.workspace_dir.join(path)
+        };
+        // Sync `stat` — intentionally blocking, since the `Tool` trait makes
+        // this method sync. Fast for local paths; would only need
+        // `block_in_place` if a remote/slow filesystem is ever supported here.
+        target.exists() // exists = edit → prompt; new = create → free
+    }
+
     async fn execute(&self, args: serde_json::Value) -> anyhow::Result<ToolResult> {
         let path = args
             .get("path")
@@ -54,7 +89,9 @@ impl Tool for FileWriteTool {
             .ok_or_else(|| anyhow::anyhow!("Missing 'content' parameter"))?;
 
         if !self.security.can_act() {
-            return Ok(ToolResult::error("Action blocked: autonomy is read-only"));
+            return Ok(ToolResult::error(
+                "[policy-blocked] Action blocked: autonomy is read-only",
+            ));
         }
 
         if self.security.is_rate_limited() {
@@ -63,44 +100,18 @@ impl Tool for FileWriteTool {
             ));
         }
 
-        // Security check: validate path is within workspace
-        if !self.security.is_path_allowed(path) {
-            return Ok(ToolResult::error(format!(
-                "Path not allowed by security policy: {path}"
-            )));
-        }
-
-        let full_path = self.security.workspace_dir.join(path);
-
-        let Some(parent) = full_path.parent() else {
-            return Ok(ToolResult::error("Invalid path: missing parent directory"));
-        };
-
-        // Ensure parent directory exists
-        tokio::fs::create_dir_all(parent).await?;
-
-        // Resolve parent AFTER creation to block symlink escapes.
-        let resolved_parent = match tokio::fs::canonicalize(parent).await {
+        // Security check first: validate path string, resolve symlinks, confirm workspace
+        // containment. validate_parent_path walks up to the deepest existing ancestor so
+        // it does not require the parent directory to exist yet.
+        let resolved_target = match self.security.validate_parent_path(path).await {
             Ok(p) => p,
-            Err(e) => {
-                return Ok(ToolResult::error(format!(
-                    "Failed to resolve file path: {e}"
-                )));
-            }
+            Err(msg) => return Ok(ToolResult::error(msg)),
         };
 
-        if !self.security.is_resolved_path_allowed(&resolved_parent) {
-            return Ok(ToolResult::error(format!(
-                "Resolved path escapes workspace: {}",
-                resolved_parent.display()
-            )));
+        // Create parent directory only at the validated, resolved location.
+        if let Some(resolved_parent) = resolved_target.parent() {
+            tokio::fs::create_dir_all(resolved_parent).await?;
         }
-
-        let Some(file_name) = full_path.file_name() else {
-            return Ok(ToolResult::error("Invalid path: missing file name"));
-        };
-
-        let resolved_target = resolved_parent.join(file_name);
 
         // If the target already exists and is a symlink, refuse to follow it
         if let Ok(meta) = tokio::fs::symlink_metadata(&resolved_target).await {
@@ -319,7 +330,14 @@ mod tests {
             .unwrap();
 
         assert!(result.is_error);
-        assert!(result.output().contains("escapes workspace"));
+        // SecurityPolicy now blocks symlink escapes at the is_path_allowed
+        // layer (#1927) — error becomes "Path not allowed by security
+        // policy" rather than the deeper "escapes workspace" message.
+        let out = result.output();
+        assert!(
+            out.contains("escapes workspace") || out.contains("not allowed"),
+            "expected escape/not-allowed error, got: {out}"
+        );
         assert!(!outside.join("hijack.txt").exists());
 
         let _ = tokio::fs::remove_dir_all(&root).await;
@@ -339,6 +357,17 @@ mod tests {
 
         assert!(result.is_error);
         assert!(result.output().contains("read-only"));
+        // The readonly block must carry the hard-reject marker so the agent
+        // harness recognizes it and halts on a verbatim repeat instead of
+        // grinding. Ties this tool's literal to the marker const — the
+        // const→detector half is covered by tool_loop's guard tests.
+        assert!(
+            result
+                .output()
+                .contains(crate::openhuman::security::POLICY_BLOCKED_MARKER),
+            "file_write readonly block must carry the hard-reject marker: {}",
+            result.output()
+        );
         assert!(!dir.join("out.txt").exists());
 
         let _ = tokio::fs::remove_dir_all(&dir).await;
@@ -395,9 +424,13 @@ mod tests {
             .unwrap();
 
         assert!(result.is_error, "writing through symlink must be blocked");
+        // The symlink-safe is_path_allowed check (#1927) blocks at the
+        // policy layer before the tool's own symlink-target detection
+        // runs; accept either error message.
+        let out = result.output();
         assert!(
-            result.output().contains("symlink"),
-            "error should mention symlink"
+            out.contains("symlink") || out.contains("not allowed"),
+            "error should mention symlink or policy block, got: {out}"
         );
 
         // Verify original file was not modified

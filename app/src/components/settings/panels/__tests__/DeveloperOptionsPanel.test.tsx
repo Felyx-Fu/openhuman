@@ -98,6 +98,24 @@ describe('DeveloperOptionsPanel — CoreModeBadge', () => {
     renderWithProviders(<Panel />, { preloadedState: { coreMode: { mode: { kind: 'unset' } } } });
     expect(screen.getByText(/Core mode: not set/i)).toBeInTheDocument();
   });
+
+  test('localizes developer menu destinations', async () => {
+    hoisted.isTauri.mockReturnValue(false);
+    vi.resetModules();
+    const Panel = await importPanel();
+    const { I18nProvider } = await import('../../../../lib/i18n/I18nContext');
+    renderWithProviders(
+      <I18nProvider>
+        <Panel />
+      </I18nProvider>,
+      { preloadedState: { locale: { current: 'zh-CN' } } }
+    );
+
+    expect(screen.getByText('AI 配置')).toBeInTheDocument();
+    expect(screen.getByText('屏幕感知')).toBeInTheDocument();
+    // The messaging tile was removed; composio replaced it as a single destination.
+    expect(screen.getByText('Composio')).toBeInTheDocument();
+  });
 });
 
 describe('DeveloperOptionsPanel — Sentry test row', () => {

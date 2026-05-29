@@ -40,6 +40,7 @@ impl Provider for StubProvider {
             text: Some("ok".into()),
             tool_calls: Vec::new(),
             usage: None,
+            reasoning_content: None,
         })
     }
 }
@@ -117,6 +118,8 @@ fn sample_turn() -> TurnContext {
         }],
         turn_duration_ms: 15,
         session_id: Some("s1".into()),
+        agent_id: None,
+        entrypoint: None,
         iteration_count: 1,
     }
 }

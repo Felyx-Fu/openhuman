@@ -1,11 +1,15 @@
+import debug from 'debug';
 import { useEffect, useState } from 'react';
 import { useLocation, useParams } from 'react-router-dom';
 
 import { useT } from '../../../lib/i18n/I18nContext';
 import { useCoreState } from '../../../providers/CoreStateProvider';
 import { teamApi } from '../../../services/api/teamApi';
+import { sanitizeError } from '../../../utils/sanitize';
 import SettingsHeader from '../components/SettingsHeader';
 import { useSettingsNavigation } from '../hooks/useSettingsNavigation';
+
+const log = debug('core-rpc:error');
 
 const TeamInvitesPanel = () => {
   const { t } = useT();
@@ -34,7 +38,15 @@ const TeamInvitesPanel = () => {
   useEffect(() => {
     if (!currentTeamId) return;
     setIsLoadingInvites(true);
-    void refreshTeamInvites(currentTeamId).finally(() => setIsLoadingInvites(false));
+    // `.finally()` alone left this as `void promise(...)`, so any rejection
+    // (cold core boot, backend 504, local AbortController timeout) became an
+    // unhandled rejection → OPENHUMAN-REACT-12. Swallow into a logged
+    // breadcrumb; the user can retry by navigating away and back.
+    refreshTeamInvites(currentTeamId)
+      .catch(err => {
+        log('refreshTeamInvites failed in TeamInvitesPanel: %O', sanitizeError(err));
+      })
+      .finally(() => setIsLoadingInvites(false));
   }, [currentTeamId, refreshTeamInvites]);
 
   const handleGenerate = async () => {
@@ -48,7 +60,7 @@ const TeamInvitesPanel = () => {
       setError(
         err && typeof err === 'object' && 'error' in err
           ? String(err.error)
-          : 'Failed to generate invite'
+          : t('invites.failedGenerate')
       );
     } finally {
       setIsGenerating(false);
@@ -84,7 +96,7 @@ const TeamInvitesPanel = () => {
       setError(
         err && typeof err === 'object' && 'error' in err
           ? String(err.error)
-          : 'Failed to revoke invite'
+          : t('invites.failedRevoke')
       );
     } finally {
       setRevokingId(null);
@@ -142,7 +154,7 @@ const TeamInvitesPanel = () => {
                       d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
                     />
                   </svg>
-                  Generating...
+                  {t('invites.generating')}
                 </>
               ) : (
                 <>
@@ -154,7 +166,7 @@ const TeamInvitesPanel = () => {
                       d="M12 4v16m8-8H4"
                     />
                   </svg>
-                  Generate Invite
+                  {t('invites.generate')}
                 </>
               )}
             </button>
@@ -178,7 +190,7 @@ const TeamInvitesPanel = () => {
                   d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
                 />
               </svg>
-              Refreshing invites...
+              {t('invites.refreshing')}
             </div>
           )}
 
@@ -204,7 +216,7 @@ const TeamInvitesPanel = () => {
                 />
               </svg>
               <span className="ml-3 text-sm text-stone-500 dark:text-neutral-400">
-                Loading invites...
+                {t('invites.loading')}
               </span>
             </div>
           ) : invites.length > 0 ? (
@@ -234,12 +246,12 @@ const TeamInvitesPanel = () => {
                         </code>
                         {status === 'expired' && (
                           <span className="px-1.5 py-0.5 text-[10px] font-medium rounded-full bg-coral-500/20 text-coral-400 border border-coral-500/30">
-                            Expired
+                            {t('rewards.referralSection.statusExpired')}
                           </span>
                         )}
                         {status === 'used' && (
                           <span className="px-1.5 py-0.5 text-[10px] font-medium rounded-full bg-amber-500/20 text-amber-400 border border-amber-500/30">
-                            Used Up
+                            {t('invites.usedUp')}
                           </span>
                         )}
                       </div>
@@ -253,7 +265,7 @@ const TeamInvitesPanel = () => {
                               ? 'text-stone-500 dark:text-neutral-400 hover:text-stone-900 dark:hover:text-neutral-100 hover:bg-stone-100 dark:hover:bg-neutral-800'
                               : 'text-stone-600 dark:text-neutral-300 cursor-not-allowed'
                           }`}
-                          aria-label="Copy invite code">
+                          aria-label={t('invites.copyCodeAria')}>
                           {copiedId === invite._id ? (
                             <svg
                               className="w-4 h-4 text-sage-400"
@@ -288,7 +300,7 @@ const TeamInvitesPanel = () => {
                             onClick={() => handleRevoke(invite._id, invite.code)}
                             disabled={revokingId === invite._id}
                             className="p-1.5 rounded-lg text-stone-500 dark:text-neutral-400 hover:text-coral-400 hover:bg-coral-500/10 transition-colors disabled:opacity-50"
-                            aria-label="Revoke invite">
+                            aria-label={t('invites.revokeAria')}>
                             <svg
                               className="w-4 h-4"
                               fill="none"
@@ -307,13 +319,17 @@ const TeamInvitesPanel = () => {
                     </div>
                     <div className="flex items-center gap-3 text-xs text-stone-500 dark:text-neutral-400">
                       <span>
-                        Uses: {invite.currentUses}
-                        {invite.maxUses > 0 ? `/${invite.maxUses}` : ''}
+                        {t('invites.uses')
+                          .replace('{current}', String(invite.currentUses))
+                          .replace('{max}', invite.maxUses > 0 ? `/${invite.maxUses}` : '')}
                       </span>
                       <span>
                         {status === 'expired'
-                          ? 'Expired'
-                          : `Expires ${new Date(invite.expiresAt).toLocaleDateString()}`}
+                          ? t('rewards.referralSection.statusExpired')
+                          : t('invites.expiresOn').replace(
+                              '{date}',
+                              new Date(invite.expiresAt).toLocaleDateString()
+                            )}
                       </span>
                     </div>
                   </div>
@@ -334,9 +350,9 @@ const TeamInvitesPanel = () => {
                   d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"
                 />
               </svg>
-              <p className="text-sm text-stone-500 dark:text-neutral-400">No invites yet</p>
+              <p className="text-sm text-stone-500 dark:text-neutral-400">{t('invites.empty')}</p>
               <p className="text-xs text-stone-600 dark:text-neutral-300 mt-1">
-                Generate an invite code to share with others
+                {t('invites.emptyHint')}
               </p>
             </div>
           )}
@@ -346,7 +362,7 @@ const TeamInvitesPanel = () => {
             <div className="fixed inset-0 bg-stone-900/50 flex items-center justify-center z-50 p-4">
               <div className="bg-white dark:bg-neutral-900 rounded-2xl p-6 w-full max-w-md border border-stone-200 dark:border-neutral-800">
                 <h3 className="text-sm font-semibold text-stone-900 dark:text-neutral-100 mb-4">
-                  Revoke Invite Code
+                  {t('invites.revokeTitle')}
                 </h3>
 
                 {error && (
@@ -358,15 +374,13 @@ const TeamInvitesPanel = () => {
                 <div className="space-y-4">
                   <div className="text-sm text-stone-400 dark:text-neutral-500">
                     <p>
-                      Are you sure you want to revoke the invite code{' '}
+                      {t('invites.revokePromptPrefix')}{' '}
                       <code className="text-stone-900 dark:text-neutral-100 bg-stone-100 dark:bg-neutral-800 px-1.5 py-0.5 rounded font-mono text-xs">
                         {inviteToRevoke.code}
                       </code>
                       ?
                     </p>
-                    <p className="mt-2 text-amber-400">
-                      This invite code will no longer be valid and cannot be used to join the team.
-                    </p>
+                    <p className="mt-2 text-amber-400">{t('invites.revokeWarning')}</p>
                   </div>
 
                   <div className="flex gap-2 pt-2">
@@ -374,13 +388,15 @@ const TeamInvitesPanel = () => {
                       onClick={() => setInviteToRevoke(null)}
                       disabled={revokingId === inviteToRevoke.id}
                       className="flex-1 px-4 py-2 text-sm font-medium rounded-xl bg-stone-100 dark:bg-neutral-800 hover:bg-stone-200 dark:hover:bg-neutral-700 text-stone-700 dark:text-neutral-200 transition-colors disabled:opacity-50">
-                      Cancel
+                      {t('common.cancel')}
                     </button>
                     <button
                       onClick={confirmRevokeInvite}
                       disabled={revokingId === inviteToRevoke.id}
                       className="flex-1 px-4 py-2 text-sm font-medium rounded-xl bg-coral-500 hover:bg-coral-600 text-white transition-colors disabled:opacity-50">
-                      {revokingId === inviteToRevoke.id ? 'Revoking...' : 'Revoke Invite'}
+                      {revokingId === inviteToRevoke.id
+                        ? t('invites.revoking')
+                        : t('invites.revokeAction')}
                     </button>
                   </div>
                 </div>

@@ -1,8 +1,8 @@
 /**
  * Analytics & Sentry service
  *
- * Initializes Sentry for error reporting and Google Analytics 4 for anonymous
- * usage tracking. Both are gated on user analytics consent and skipped in dev.
+ * Initializes Sentry for error reporting and OpenPanel for anonymous
+ * usage tracking. Both are gated on user analytics consent.
  *
  * Sentry privacy guarantees enforced in `beforeSend`:
  *   - No breadcrumbs, requests, extras, or arbitrary contexts (only OS /
@@ -12,14 +12,11 @@
  *   - `sendDefaultPii: false` (no IP, no cookies)
  *   - All breadcrumb-producing integrations disabled
  *
- * GA4 privacy guarantees:
+ * OpenPanel privacy guarantees:
  *   - Only page views and feature-engagement events from the allowlist are sent
  *   - No user content, messages, credentials, or PII is ever included
- *   - Ad personalization signals are disabled
- *   - Skipped when `IS_DEV` is true or `GA_MEASUREMENT_ID` is not set
  */
 import * as Sentry from '@sentry/react';
-import ReactGA from 'react-ga4';
 
 import { getCoreStateSnapshot } from '../lib/coreState/store';
 import {
@@ -30,30 +27,60 @@ import {
   SENTRY_RELEASE,
   SENTRY_SMOKE_TEST,
 } from '../utils/config';
+import { CoreRpcError } from './coreRpcClient';
 
 // ---------------------------------------------------------------------------
-// GA4 — module-level state
+// Google Analytics 4 typings — raw gtag.js API
 // ---------------------------------------------------------------------------
 
-/** Set to `true` after `ReactGA.initialize()` succeeds. */
+type GtagCommand = 'config' | 'event' | 'set' | 'js';
+interface GtagFn {
+  (...args: [GtagCommand, ...unknown[]]): void;
+}
+
+// ---------------------------------------------------------------------------
+// OpenPanel typings — raw script injection API
+// ---------------------------------------------------------------------------
+
+type OpMethod = 'init' | 'track' | 'identify' | 'increment' | 'decrement' | 'clear' | 'alias';
+interface OpFn {
+  (...args: [OpMethod, ...unknown[]]): void;
+  q?: unknown[];
+}
+
+declare global {
+  interface Window {
+    dataLayer: unknown[];
+    gtag: GtagFn;
+    op: OpFn;
+  }
+}
+
+const OPENPANEL_CLIENT_ID = 'e9c996d5-497f-4eec-9bde-630019ad525b';
+const OPENPANEL_API_URL = 'https://panel.tinyhumans.ai/api';
+
+// ---------------------------------------------------------------------------
+// Module-level state
+// ---------------------------------------------------------------------------
+
 let gaInitialized = false;
+let opInitialized = false;
 
 /**
- * Shadow of the user's analytics consent state for GA operations that need to
- * check it without async reads. Kept in sync by `syncAnalyticsConsent`.
- * Default: `false` (deny until explicitly allowed).
+ * Shadow of the user's analytics consent state. Kept in sync by
+ * `syncAnalyticsConsent`. Default: `false` (deny until explicitly allowed).
  */
-let gaEnabled = false;
+let analyticsEnabled = false;
 
 /**
- * Allowlist of event names that may be sent to GA4.
+ * Allowlist of event names that may be sent to OpenPanel.
  *
  * Keeping an explicit allowlist prevents accidentally forwarding internal
  * debug names or future ad-hoc calls that could carry sensitive information.
  * Any `trackEvent` call with a name not in this set is dropped and a warning
  * is logged.
  */
-export const GA_ALLOWED_EVENTS = new Set([
+export const ALLOWED_EVENTS = new Set([
   'app_open',
   'onboarding_start',
   'onboarding_step_complete',
@@ -68,6 +95,20 @@ export const GA_ALLOWED_EVENTS = new Set([
 /** Check if the current user has opted into analytics. */
 export function isAnalyticsEnabled(): boolean {
   return getCoreStateSnapshot().snapshot.analyticsEnabled;
+}
+
+/**
+ * Cross-realm-safe check for a `CoreRpcError` with `kind === 'timeout'`.
+ * `instanceof` can fail across module scopes (test harness, dynamic import,
+ * Vitest module isolation), so also accept a duck-typed match on `name`
+ * and `kind`. Used by the Sentry `beforeSend` filter to drop the
+ * OPENHUMAN-REACT-15/11/10/12/Z/Y family at the source.
+ */
+function isCoreRpcTimeoutError(err: unknown): boolean {
+  if (err instanceof CoreRpcError) return err.kind === 'timeout';
+  if (typeof err !== 'object' || err === null) return false;
+  const candidate = err as { name?: unknown; kind?: unknown };
+  return candidate.name === 'CoreRpcError' && candidate.kind === 'timeout';
 }
 
 export function initSentry(): void {
@@ -105,7 +146,19 @@ export function initSentry(): void {
     ],
     sendDefaultPii: false,
 
-    beforeSend(event) {
+    beforeSend(event, hint) {
+      // Drop noisy local-AbortController RPC timeouts at the source so a
+      // missed `.catch()` at a future call site cannot regress the
+      // OPENHUMAN-REACT-15/11/10/12/Z/Y family. Sister to the Rust-side
+      // `is_session_expired_event` filter / loopback classifier in PR #2063.
+      // Cross-realm-safe: also accept a non-instanceof match on the
+      // class name + kind (test harness can construct CoreRpcError in a
+      // different module scope).
+      const original = hint?.originalException as unknown;
+      if (isCoreRpcTimeoutError(original)) {
+        return null;
+      }
+
       // Always allow the smoke-test event through so pipeline validation works
       // even when the user hasn't opted into analytics yet on first boot.
       const isSmokeTest = event.message === 'react-sentry-smoke-test';
@@ -164,11 +217,6 @@ export function initSentry(): void {
       return event;
     },
 
-    beforeSendTransaction() {
-      // Block all transactions (performance traces).
-      return null;
-    },
-
     // Ignore common non-actionable errors.
     ignoreErrors: ['ResizeObserver loop', 'Network request failed', 'Load failed', 'AbortError'],
   });
@@ -201,96 +249,129 @@ export function syncAnalyticsConsent(enabled: boolean): void {
     void Sentry.flush(2000);
   }
 
-  // Update the GA consent shadow. Ad-personalization is already disabled
-  // unconditionally in initGA() — no need to re-set it on every toggle.
-  gaEnabled = enabled;
-  if (gaInitialized) {
-    console.debug(`[analytics] GA consent updated: enabled=${enabled}`);
+  analyticsEnabled = enabled;
+  if (gaInitialized || opInitialized) {
+    console.debug(`[analytics] consent updated: enabled=${enabled}`);
   }
 }
 
 // ---------------------------------------------------------------------------
-// GA4 — public API
+// Analytics — public API (GA4 + OpenPanel, both fire on every call)
 // ---------------------------------------------------------------------------
 
-/**
- * Initialize Google Analytics 4.
- *
- * No-ops when:
- *   - `GA_MEASUREMENT_ID` is empty/unset
- *   - `IS_DEV` is true (dev builds never send analytics)
- *   - Already initialized (idempotent)
- */
-export function initGA(): void {
-  if (gaInitialized) return;
-  if (IS_DEV) {
-    console.debug('[analytics] GA skipped in dev build');
-    return;
-  }
-  if (!GA_MEASUREMENT_ID) {
-    console.debug('[analytics] GA skipped — VITE_GA_MEASUREMENT_ID not set');
-    return;
-  }
-
+function initGoogleAnalytics(): void {
+  if (gaInitialized || !GA_MEASUREMENT_ID) return;
   try {
-    ReactGA.initialize(GA_MEASUREMENT_ID, {
-      gaOptions: {
-        // Disable automatic page view so we send them manually from AppShell.
-        send_page_view: false,
-      },
+    window.dataLayer = window.dataLayer || [];
+    window.gtag = function gtag(...args: [GtagCommand, ...unknown[]]) {
+      window.dataLayer.push(args);
+    };
+    window.gtag('js', new Date());
+    window.gtag('config', GA_MEASUREMENT_ID, {
+      send_page_view: false,
+      allow_ad_personalization_signals: false,
     });
-    // Disable ad personalization signals unconditionally — this is a privacy
-    // tool, not an advertising platform.
-    ReactGA.set({ allow_ad_personalization_signals: false });
+
+    const script = document.createElement('script');
+    script.async = true;
+    script.src = `https://www.googletagmanager.com/gtag/js?id=${GA_MEASUREMENT_ID}`;
+    document.head.appendChild(script);
+
     gaInitialized = true;
-    // Sync enabled state from the current consent snapshot now that GA is up.
-    gaEnabled = isAnalyticsEnabled();
-    console.debug('[analytics] GA initialized', { measurementId: GA_MEASUREMENT_ID });
+    console.debug('[analytics] GA initialized (gtag.js)', { measurementId: GA_MEASUREMENT_ID });
   } catch (err) {
     console.warn('[analytics] GA initialization failed:', err);
   }
 }
 
-/**
- * Send an anonymous page view if analytics consent is on and GA is initialized.
- *
- * @param path - The route pathname (e.g. `/home`, `/settings`). Never include
- *   query strings or hash fragments that could contain user content.
- */
-export function trackPageView(path: string): void {
-  if (!gaInitialized || !gaEnabled) return;
-  console.debug('[analytics] trackPageView', { path });
-  ReactGA.send({ hitType: 'pageview', page: path });
+function initOpenPanel(): void {
+  if (opInitialized) return;
+  try {
+    window.op =
+      window.op ||
+      (function (this: void) {
+        const n: unknown[] = [];
+        return new Proxy(
+          function (this: void) {
+            if (arguments.length) n.push([].slice.call(arguments));
+          } as unknown as OpFn,
+          {
+            get(_t: unknown, r: string) {
+              if (r === 'q') return n;
+              return function () {
+                n.push([r].concat([].slice.call(arguments)));
+              };
+            },
+            has(_t: unknown, r: string) {
+              return r === 'q';
+            },
+          }
+        );
+      })();
+
+    window.op('init', {
+      apiUrl: OPENPANEL_API_URL,
+      clientId: OPENPANEL_CLIENT_ID,
+      trackScreenViews: false,
+      trackOutgoingLinks: false,
+      trackAttributes: false,
+    });
+
+    const script = document.createElement('script');
+    script.defer = true;
+    script.async = true;
+    script.src = 'https://openpanel.dev/op1.js';
+    document.head.appendChild(script);
+
+    opInitialized = true;
+    console.debug('[analytics] OpenPanel initialized', { clientId: OPENPANEL_CLIENT_ID });
+  } catch (err) {
+    console.warn('[analytics] OpenPanel initialization failed:', err);
+  }
 }
 
 /**
- * Send an anonymous feature-engagement event if analytics consent is on.
+ * Initialize all analytics providers (GA4 + OpenPanel).
+ * Idempotent — each provider initializes at most once.
+ */
+export function initGA(): void {
+  initGoogleAnalytics();
+  initOpenPanel();
+  analyticsEnabled = isAnalyticsEnabled();
+}
+
+/**
+ * Send an anonymous page view to all initialized providers.
+ */
+export function trackPageView(path: string): void {
+  if ((!gaInitialized && !opInitialized) || !analyticsEnabled) return;
+  console.debug('[analytics] trackPageView', { path });
+  if (gaInitialized) window.gtag('event', 'page_view', { page_path: path });
+  if (opInitialized) window.op('track', 'screen_view', { page: path });
+}
+
+/**
+ * Send an anonymous feature-engagement event to all initialized providers.
  *
- * Event names must appear in `GA_ALLOWED_EVENTS`. Calls with unlisted names
- * are dropped and a console warning is emitted — this prevents accidental
- * exfiltration of internal or sensitive event names.
- *
- * Params must contain only non-sensitive metadata (strings, numbers, booleans).
- * Never pass user content, credentials, message text, or PII.
- *
- * @param eventName - An allowlisted event name.
- * @param params    - Optional key/value metadata attached to the event.
+ * Event names must appear in `ALLOWED_EVENTS`. Calls with unlisted names
+ * are dropped and a console warning is emitted.
  */
 export function trackEvent(
   eventName: string,
   params?: Record<string, string | number | boolean>
 ): void {
-  if (!gaInitialized || !gaEnabled) return;
+  if ((!gaInitialized && !opInitialized) || !analyticsEnabled) return;
 
-  if (!GA_ALLOWED_EVENTS.has(eventName)) {
+  if (!ALLOWED_EVENTS.has(eventName)) {
     console.warn(
-      `[analytics] trackEvent dropped — '${eventName}' is not in GA_ALLOWED_EVENTS allowlist`
+      `[analytics] trackEvent dropped — '${eventName}' is not in ALLOWED_EVENTS allowlist`
     );
     return;
   }
 
   console.debug('[analytics] trackEvent', { eventName, params });
-  ReactGA.event(eventName, params);
+  if (gaInitialized) window.gtag('event', eventName, params);
+  if (opInitialized) window.op('track', eventName, params);
 }
 
 /**

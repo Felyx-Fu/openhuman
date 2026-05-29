@@ -105,7 +105,7 @@ const fr2: TranslationMap = {
     "Lancé en processus interne par le shell Tauri au démarrage de l'app.",
   'devOptions.cloud': 'Cloud',
   'devOptions.remoteCoreRpc': 'RPC core distant',
-  'devOptions.token': 'Token',
+  'devOptions.token': 'Jeton',
   'devOptions.tokenNotSet': 'non défini — le RPC renverra 401',
   'devOptions.triggerSentryTest': 'Déclencher un test Sentry (staging)',
   'devOptions.triggerSentryTestDesc':
@@ -145,10 +145,10 @@ const fr2: TranslationMap = {
   'team.failedToSwitch': "Échec du changement d'équipe",
   'team.failedToLeave': "Échec de la sortie de l'équipe",
   'team.role.owner': 'Propriétaire',
-  'team.role.admin': 'Admin',
+  'team.role.admin': 'Administrateur',
   'team.role.billingManager': 'Gestionnaire de facturation',
   'team.role.member': 'Membre',
-  'team.active': 'Active',
+  'team.active': 'Actif',
   'team.personalTeam': 'Équipe personnelle',
   'team.manageTeam': "Gérer l'équipe",
   'team.switching': 'Changement…',
@@ -237,7 +237,7 @@ const fr2: TranslationMap = {
     "Les déclencheurs sont toujours enregistrés dans l'historique — aucun tour LLM n'est exécuté.",
   'composio.disableSpecificIntegrations':
     'Désactiver le triage IA pour des intégrations spécifiques',
-  'composio.settingsSaved': 'Settings saved',
+  'composio.settingsSaved': 'Paramètres enregistrés',
   'composio.saveFailed': "Échec de l'enregistrement. Réessaie.",
   'cron.title': 'Tâches cron',
   'cron.scheduledJobs': 'Tâches planifiées',
@@ -253,6 +253,16 @@ const fr2: TranslationMap = {
     "Interrupteur principal. Désactivé par défaut — Ollama reste en veille. Quand activé, le résumeur d'arbre, l'intelligence d'écran et l'autocomplétion utilisent toujours le modèle local.",
   'localModel.advancedSettings': 'Paramètres avancés',
   'localModel.debugTitle': 'Débogage du modèle local',
+  'localModel.ollamaServer.helperText': 'Exemple : http://192.168.1.5:11434',
+  'localModel.ollamaServer.label': 'URL du serveur Ollama',
+  'localModel.ollamaServer.modelCount': 'modèles',
+  'localModel.ollamaServer.placeholder': 'http://localhost:11434',
+  'localModel.ollamaServer.reachable': 'Accessible',
+  'localModel.ollamaServer.resetButton': 'Réinitialiser par défaut',
+  'localModel.ollamaServer.saveButton': 'Enregistrer',
+  'localModel.ollamaServer.testButton': 'Tester la connexion',
+  'localModel.ollamaServer.unreachable': 'Inaccessible',
+  'localModel.ollamaServer.validationError': 'Doit être une URL http:// ou https:// valide',
   'screenAwareness.debugTitle': "Débogage de la surveillance de l'écran",
   'memory.debugTitle': 'Débogage de la mémoire',
   'webhooks.debugTitle': 'Débogage des webhooks',
@@ -267,7 +277,7 @@ const fr2: TranslationMap = {
   'chat.filter.work': 'Travail',
   'chat.filter.briefing': 'Briefing',
   'chat.filter.notification': 'Notification',
-  'chat.filter.workers': 'Workers',
+  'chat.filter.workers': 'Travailleurs',
   'chat.selectThread': 'Sélectionne un fil',
   'chat.threads': 'Fils',
   'chat.noThreads': "Aucun fil pour l'instant",
@@ -276,6 +286,7 @@ const fr2: TranslationMap = {
   'chat.deleteThread': 'Supprimer le fil',
   'chat.deleteThreadConfirm': 'Es-tu sûr de vouloir supprimer « {title} » ?',
   'chat.untitledThread': 'Fil sans titre',
+  'chat.editThreadTitle': 'Edit thread title',
   'chat.hideSidebar': 'Masquer la barre latérale',
   'chat.showSidebar': 'Afficher la barre latérale',
   'chat.newThreadShortcut': 'Nouveau fil (/new)',
@@ -291,10 +302,10 @@ const fr2: TranslationMap = {
   'chat.topUpToContinue': 'Recharge pour continuer.',
   'chat.budgetComplete':
     'Ton budget inclus est épuisé. Ajoute des crédits ou passe à la version supérieure pour continuer.',
-  'chat.rateLimitReached': 'Limite de débit sur 10 heures atteinte.',
   'chat.topUp': 'Recharger',
-  'chat.fiveHourLimit': 'Limite de 5 heures',
-  'chat.weeklyLimit': 'Limite hebdomadaire',
+  'chat.cycle': 'Cycle',
+  'chat.cycleSpent': 'Dépensé ce cycle',
+  'chat.cycleRemaining': 'Restant',
   'chat.left': 'restant',
   'chat.setup': 'Configurer',
   'chat.switchToText': 'Passer au texte',
@@ -307,6 +318,13 @@ const fr2: TranslationMap = {
   'chat.turn': 'tour',
   'chat.turns': 'tours',
   'chat.openWorkerThread': 'Ouvrir le fil worker',
+  'chat.attachment.attach': 'Joindre une image',
+  'chat.attachment.remove': 'Supprimer {name}',
+  'chat.attachment.tooMany': 'Maximum {max} images par message',
+  'chat.attachment.tooLarge': "L'image dépasse la taille limite de {max}",
+  'chat.attachment.unsupportedType':
+    'Type de fichier non pris en charge. Utilisez PNG, JPEG, WebP, GIF ou BMP.',
+  'chat.attachment.readFailed': 'Impossible de lire le fichier',
   'memory.searchAria': 'Rechercher dans la mémoire',
   'memory.searchPlaceholder': 'Rechercher des entrées de mémoire…',
   'memory.sourceFilter.all': 'Toutes les sources',
@@ -385,6 +403,48 @@ const fr2: TranslationMap = {
   'insights.relationships': 'Relations',
   'insights.skills': 'Compétences',
   'insights.opinions': 'Opinions',
+  // Developer options menu items (#2225) — English stubs; native translations welcome
+  'devOptions.menuAi': "Configuration de l'IA",
+  'devOptions.menuAiDesc':
+    'Fournisseurs de cloud, modèles Ollama locaux et routage par charge de travail',
+  'devOptions.menuScreenAware': "Connaissance de l'écran",
+  'devOptions.menuScreenAwareDesc':
+    "Autorisations de capture d'écran, stratégie de surveillance et contrôles de session",
+  'devOptions.menuMessaging': 'Canaux de messagerie',
+  'devOptions.menuMessagingDesc':
+    "Configurer les modes d'authentification Telegram/Discord et le routage des canaux par défaut",
+  'devOptions.menuTools': 'Outils',
+  'devOptions.menuToolsDesc':
+    'Activer ou désactiver les fonctionnalités que OpenHuman peut utiliser en votre nom',
+  'devOptions.menuAgentChat': "Chat d'agent",
+  'devOptions.menuAgentChatDesc':
+    "Conversation de l'agent de test avec remplacements de modèle et de température",
+  'devOptions.menuCronJobs': 'Tâches Cron',
+  'devOptions.menuCronJobsDesc':
+    "Afficher et configurer les tâches planifiées pour les compétences d'exécution",
+  'devOptions.menuLocalModelDebug': 'Débogage du modèle local',
+  'devOptions.menuLocalModelDebugDesc':
+    "Ollama configuration, téléchargements d'actifs, tests de modèles et diagnostics",
+  'devOptions.menuWebhooksDebug': 'Webhooks',
+  'devOptions.menuWebhooksDebugDesc':
+    "Inspecter les enregistrements de webhooks d'exécution et les journaux de requêtes capturés",
+  'devOptions.menuIntelligence': 'Intelligence',
+  'devOptions.menuIntelligenceDesc':
+    'Espace de travail mémoire, moteur subconscient, rêves et paramètres',
+  'devOptions.menuNotificationRouting': 'Routage des notifications',
+  'devOptions.menuNotificationRoutingDesc':
+    "Score d'importance de l'IA et escalade de l'orchestrateur pour les alertes d'intégration",
+  'devOptions.menuComposeIOTriggers': 'Déclencheurs ComposeIO',
+  'devOptions.menuComposeIOTriggersDesc':
+    "Afficher l'historique et les archives des déclencheurs ComposeIO",
+  'devOptions.menuComposioRouting': 'Routage Composio (mode direct)',
+  'devOptions.menuComposioRoutingDesc':
+    'Apportez votre propre clé Composio API et acheminez les appels directement vers backend.composio.dev',
+  'devOptions.menuComposioTriggers': "Déclencheurs d'intégration",
+  'devOptions.menuComposioTriggersDesc':
+    "Configurez les paramètres de triage IA pour les déclencheurs d'intégration Composio",
+  'mic.deviceSelector': 'Dispositif de microphone',
+  'mic.tapToSendCountdown': 'Appuie pour envoyer ({seconds}s)',
 };
 
 export default fr2;

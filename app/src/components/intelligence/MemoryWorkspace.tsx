@@ -29,7 +29,6 @@ import { useCallback, useEffect, useState } from 'react';
 
 import { useT } from '../../lib/i18n/I18nContext';
 import type { ToastNotification } from '../../types/intelligence';
-import { openUrl } from '../../utils/openUrl';
 import {
   type GraphExportResponse,
   type GraphMode,
@@ -40,6 +39,8 @@ import {
 } from '../../utils/tauriCommands';
 import { MemoryGraph } from './MemoryGraph';
 import { MemorySources } from './MemorySources';
+import { MemoryTreeStatusPanel } from './MemoryTreeStatusPanel';
+import { ObsidianVaultSection } from './ObsidianVaultSection';
 import { VaultPanel } from './VaultPanel';
 import { WhatsAppMemorySection } from './WhatsAppMemorySection';
 
@@ -54,33 +55,17 @@ interface MemoryWorkspaceProps {
  * adding chunks to the memory tree.
  *
  * Source of truth: providers under
- * `src/openhuman/composio/providers/<toolkit>/` that call
- * `ingest_page_into_memory_tree`. Today that's gmail. Add a slug here
- * when a new provider lands a memory-tree ingest path.
+ * `src/openhuman/memory_sync/composio/providers/<toolkit>/` that
+ * persist items via `store_skill_sync` into the memory tree.
  */
-const SYNCABLE_TOOLKITS: ReadonlySet<string> = new Set(['gmail']);
-
-/**
- * Trigger the `obsidian://open?path=<abs>` deep link via the OS shell.
- *
- * We deliberately route through `openUrl` (which delegates to
- * `tauri-plugin-opener`) rather than setting `window.location.href`.
- * The webview-host intent handler intercepts in-app navigations and
- * does NOT punt custom schemes to the OS, so a direct
- * `window.location.href = "obsidian://…"` either no-ops or navigates
- * the React app away from the Memory tab. The opener plugin hands the
- * URL straight to the system handler so Obsidian launches as a
- * separate process.
- */
-async function openVaultInObsidian(contentRootAbs: string): Promise<void> {
-  const url = `obsidian://open?path=${encodeURIComponent(contentRootAbs)}`;
-  console.debug('[ui-flow][memory-workspace] open vault in Obsidian url=%s', url);
-  try {
-    await openUrl(url);
-  } catch (err) {
-    console.error('[ui-flow][memory-workspace] openUrl failed', err);
-  }
-}
+const SYNCABLE_TOOLKITS: ReadonlySet<string> = new Set([
+  'clickup',
+  'github',
+  'gmail',
+  'linear',
+  'notion',
+  'slack',
+]);
 
 export function MemoryWorkspace({ onToast }: MemoryWorkspaceProps) {
   const { t } = useT();
@@ -236,6 +221,7 @@ export function MemoryWorkspace({ onToast }: MemoryWorkspaceProps) {
 
   return (
     <div className="space-y-4" data-testid="memory-workspace">
+      <MemoryTreeStatusPanel onToast={onToast} />
       <MemorySources syncableToolkits={SYNCABLE_TOOLKITS} pollIntervalMs={5000} onToast={onToast} />
       <VaultPanel onToast={onToast} />
       <WhatsAppMemorySection />
@@ -308,18 +294,7 @@ export function MemoryWorkspace({ onToast }: MemoryWorkspaceProps) {
             )}
           </button>
           {graph && (
-            <button
-              type="button"
-              onClick={() => void openVaultInObsidian(graph.content_root_abs)}
-              data-testid="memory-open-in-obsidian"
-              className="inline-flex items-center gap-2 rounded-lg
-                         bg-violet-500 px-4 py-2 text-sm font-semibold text-white
-                         shadow-sm transition-colors hover:bg-violet-600
-                         focus:outline-none focus:ring-2 focus:ring-violet-300"
-              title={`obsidian://open?path=${graph.content_root_abs}`}>
-              <ExternalLinkIcon />
-              {t('workspace.viewVault')}
-            </button>
+            <ObsidianVaultSection contentRootAbs={graph.content_root_abs} onToast={onToast} />
           )}
         </div>
       </div>
@@ -333,12 +308,7 @@ export function MemoryWorkspace({ onToast }: MemoryWorkspaceProps) {
           {t('workspace.loadingGraph')}
         </div>
       ) : (
-        <MemoryGraph
-          nodes={graph.nodes}
-          edges={graph.edges}
-          mode={mode}
-          contentRootAbs={graph.content_root_abs}
-        />
+        <MemoryGraph nodes={graph.nodes} edges={graph.edges} mode={mode} />
       )}
     </div>
   );
@@ -442,25 +412,6 @@ function BrainIcon() {
       <path d="M9 4.5a2.5 2.5 0 015 0v15a2.5 2.5 0 01-5 0" />
       <path d="M9 4.5A2.5 2.5 0 116.5 7M9 19.5A2.5 2.5 0 116.5 17" />
       <path d="M14 4.5A2.5 2.5 0 1117.5 7M14 19.5A2.5 2.5 0 1017.5 17" />
-    </svg>
-  );
-}
-
-function ExternalLinkIcon() {
-  return (
-    <svg
-      width="16"
-      height="16"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.8"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden="true">
-      <path d="M14 3h7v7" />
-      <path d="M10 14L21 3" />
-      <path d="M21 14v7H3V3h7" />
     </svg>
   );
 }

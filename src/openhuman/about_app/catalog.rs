@@ -47,6 +47,12 @@ const GITHUB_RELEASES_METADATA: Option<CapabilityPrivacy> = Some(CapabilityPriva
     destinations: &["GitHub Releases"],
 });
 
+const SEARXNG_RAW_TO_CONFIGURED_INSTANCE: Option<CapabilityPrivacy> = Some(CapabilityPrivacy {
+    leaves_device: true,
+    data_kind: PrivacyDataKind::Raw,
+    destinations: &["Configured SearXNG instance"],
+});
+
 // Direct-mode Composio: the user's API key and tool arguments leave the
 // device — they are sent to backend.composio.dev, not the OpenHuman backend.
 // LOCAL_CREDENTIALS was incorrect here because leaves_device must be true.
@@ -54,6 +60,18 @@ const COMPOSIO_DIRECT_CREDENTIALS: Option<CapabilityPrivacy> = Some(CapabilityPr
     leaves_device: true,
     data_kind: PrivacyDataKind::Credentials,
     destinations: &["Composio (backend.composio.dev)"],
+});
+
+const POLYMARKET_MARKET_DATA: Option<CapabilityPrivacy> = Some(CapabilityPrivacy {
+    leaves_device: true,
+    data_kind: PrivacyDataKind::Metadata,
+    destinations: &["Polymarket Gamma API", "Polymarket CLOB API"],
+});
+
+const POLYMARKET_TRADING_DATA: Option<CapabilityPrivacy> = Some(CapabilityPrivacy {
+    leaves_device: true,
+    data_kind: PrivacyDataKind::Derived,
+    destinations: &["Polymarket CLOB API"],
 });
 
 const CAPABILITIES: &[Capability] = &[
@@ -144,6 +162,16 @@ const CAPABILITIES: &[Capability] = &[
         category: CapabilityCategory::Conversation,
         description: "Show the sequence of tool calls and actions used to answer a request.",
         how_to: "Conversations > Tool timeline",
+        status: CapabilityStatus::Beta,
+        privacy: None,
+    },
+    Capability {
+        id: "conversation.subagent_mascots",
+        name: "Subagent Mascots",
+        domain: "conversation",
+        category: CapabilityCategory::Conversation,
+        description: "Show delegated sub-agents as colored companion mascots with compact activity bubbles and running, completed, or failed states.",
+        how_to: "Human > ask the assistant to delegate work to sub-agents",
         status: CapabilityStatus::Beta,
         privacy: None,
     },
@@ -271,10 +299,20 @@ const CAPABILITIES: &[Capability] = &[
         name: "MCP Server",
         domain: "intelligence",
         category: CapabilityCategory::Intelligence,
-        description: "Expose a curated, read-only memory-tree tool surface over stdio MCP for local MCP-compatible clients.",
-        how_to: "Run `openhuman-core mcp` and configure the local MCP client to launch that command.",
+        description: "Expose a curated OpenHuman tool surface over stdio MCP or Streamable HTTP/SSE for MCP-compatible clients.",
+        how_to: "Run `openhuman-core mcp` (stdio) or `openhuman-core mcp --transport http --port 9300` for remote clients.",
         status: CapabilityStatus::Beta,
         privacy: LOCAL_RAW,
+    },
+    Capability {
+        id: "intelligence.searxng_search",
+        name: "SearXNG Search",
+        domain: "intelligence",
+        category: CapabilityCategory::Intelligence,
+        description: "Search a configured self-hosted SearXNG instance from agent and MCP tools, returning normalized title, URL, snippet, and source results.",
+        how_to: "Set `[searxng] enabled = true` and `base_url` in config.toml, or use OPENHUMAN_SEARXNG_* environment variables.",
+        status: CapabilityStatus::Beta,
+        privacy: SEARXNG_RAW_TO_CONFIGURED_INSTANCE,
     },
     Capability {
         id: "intelligence.tool_registry",
@@ -303,6 +341,16 @@ const CAPABILITIES: &[Capability] = &[
         category: CapabilityCategory::Intelligence,
         description: "Backfill the last 6 days of Slack history into the memory tree and keep it up to date by flushing each closed 6-hour UTC bucket. Driven by an authenticated Slack connection (OAuth via Composio).",
         how_to: "Settings > Messaging Channels > Slack",
+        status: CapabilityStatus::Beta,
+        privacy: LOCAL_RAW,
+    },
+    Capability {
+        id: "intelligence.clickup_memory_ingest",
+        name: "ClickUp Memory Ingestion",
+        domain: "intelligence",
+        category: CapabilityCategory::Intelligence,
+        description: "Incrementally sync ClickUp tasks assigned to the authenticated user into the Memory Tree on a 30-minute cadence, with an initial backfill on first connect. Only tasks the user is directly assigned to are ingested. Driven by an authenticated ClickUp connection (OAuth via Composio).",
+        how_to: "Settings > Connections > ClickUp",
         status: CapabilityStatus::Beta,
         privacy: LOCAL_RAW,
     },
@@ -395,6 +443,17 @@ const CAPABILITIES: &[Capability] = &[
         how_to: "Conversations > Ask the assistant to run an Apify actor",
         status: CapabilityStatus::Beta,
         privacy: None,
+    },
+    Capability {
+        id: "skills.tinyfish_web_automation",
+        name: "TinyFish Web Automation",
+        domain: "skills",
+        category: CapabilityCategory::Skills,
+        description:
+            "Search the web, render JavaScript-heavy pages, and run goal-based browser automations through TinyFish.",
+        how_to: "Conversations > Ask the assistant to search, fetch, or automate a website with TinyFish",
+        status: CapabilityStatus::Beta,
+        privacy: DERIVED_TO_BACKEND,
     },
     Capability {
         id: "skills.toggle_enabled",
@@ -504,6 +563,26 @@ const CAPABILITIES: &[Capability] = &[
         privacy: None,
     },
     Capability {
+        id: "skills.polymarket_readonly",
+        name: "Polymarket Read-Only Browse",
+        domain: "skills",
+        category: CapabilityCategory::Skills,
+        description: "Browse Polymarket markets, events, orderbooks, and prices via Gamma + CLOB APIs.",
+        how_to: "Conversations > ask the assistant to browse Polymarket (tool: polymarket).",
+        status: CapabilityStatus::Beta,
+        privacy: POLYMARKET_MARKET_DATA,
+    },
+    Capability {
+        id: "skills.polymarket_trading",
+        name: "Polymarket Trading",
+        domain: "skills",
+        category: CapabilityCategory::Skills,
+        description: "Place and cancel Polymarket limit orders with EIP-712 signing, authenticated account reads, and explicit approval for writes.",
+        how_to: "Conversations > ask the assistant to trade on Polymarket (tool: polymarket; set `approved=true` for write actions).",
+        status: CapabilityStatus::Beta,
+        privacy: POLYMARKET_TRADING_DATA,
+    },
+    Capability {
         id: "local_ai.download_model",
         name: "Download Local Models",
         domain: "local_ai",
@@ -530,6 +609,16 @@ const CAPABILITIES: &[Capability] = &[
         category: CapabilityCategory::LocalAI,
         description: "Inspect asset status and download specific chat, vision, embedding, STT, or TTS assets.",
         how_to: "Settings > Local AI Model > Advanced > Capability Assets",
+        status: CapabilityStatus::Beta,
+        privacy: None,
+    },
+    Capability {
+        id: "local_ai.model_context_check",
+        name: "Model Context Requirement Check",
+        domain: "local_ai",
+        category: CapabilityCategory::LocalAI,
+        description: "Diagnostics report each installed Ollama model's native context window and reject any model below the minimum the memory layer requires (so short-context models can't silently truncate and corrupt recall).",
+        how_to: "Settings > Local AI Model > Run Diagnostics",
         status: CapabilityStatus::Beta,
         privacy: None,
     },
@@ -789,6 +878,56 @@ const CAPABILITIES: &[Capability] = &[
         privacy: LOCAL_RAW,
     },
     Capability {
+        id: "screen_intelligence.gameplay_review_import",
+        name: "Import Gameplay Review Sessions",
+        domain: "screen_intelligence",
+        category: CapabilityCategory::ScreenIntelligence,
+        description: "Import local gameplay keyframes or a recordings folder into a review session.",
+        how_to: "Intelligence > Gameplay > Import session",
+        status: CapabilityStatus::Beta,
+        privacy: LOCAL_RAW,
+    },
+    Capability {
+        id: "screen_intelligence.gameplay_review_analyze",
+        name: "Analyze Gameplay Sessions",
+        domain: "screen_intelligence",
+        category: CapabilityCategory::ScreenIntelligence,
+        description: "Generate a recap, highlight list, and review notes from imported gameplay frames.",
+        how_to: "Intelligence > Gameplay > Analyze session",
+        status: CapabilityStatus::Beta,
+        privacy: LOCAL_RAW,
+    },
+    Capability {
+        id: "screen_intelligence.gameplay_review_clip_metadata",
+        name: "Draft Clip Metadata",
+        domain: "screen_intelligence",
+        category: CapabilityCategory::ScreenIntelligence,
+        description: "Generate platform-ready titles, descriptions, and tags for gameplay clips.",
+        how_to: "Intelligence > Gameplay > Draft clips",
+        status: CapabilityStatus::Beta,
+        privacy: LOCAL_RAW,
+    },
+    Capability {
+        id: "screen_intelligence.gameplay_review_presets",
+        name: "Save Game Coaching Presets",
+        domain: "screen_intelligence",
+        category: CapabilityCategory::ScreenIntelligence,
+        description: "Store game-specific coaching focus, spoiler mode, and notes for repeat reviews.",
+        how_to: "Intelligence > Gameplay > Presets",
+        status: CapabilityStatus::Beta,
+        privacy: LOCAL_RAW,
+    },
+    Capability {
+        id: "screen_intelligence.gameplay_review_spoilers",
+        name: "Set Spoiler Controls",
+        domain: "screen_intelligence",
+        category: CapabilityCategory::ScreenIntelligence,
+        description: "Keep gameplay coaching spoiler-safe or story-aware per session.",
+        how_to: "Intelligence > Gameplay > Spoiler mode",
+        status: CapabilityStatus::Beta,
+        privacy: LOCAL_RAW,
+    },
+    Capability {
         id: "screen_intelligence.configure_capture_fps",
         name: "Configure Capture FPS",
         domain: "screen_intelligence",
@@ -825,6 +964,17 @@ const CAPABILITIES: &[Capability] = &[
         category: CapabilityCategory::Channels,
         description: "Connect supported messaging platforms such as Telegram, Discord, or Slack.",
         how_to: "Settings > Messaging Channels",
+        status: CapabilityStatus::Beta,
+        privacy: None,
+    },
+    Capability {
+        id: "channels.telegram_remote_control",
+        name: "Telegram Remote Control",
+        domain: "channels",
+        category: CapabilityCategory::Channels,
+        description:
+            "Operate OpenHuman from Telegram with slash commands: /status, /sessions, /new, and /help.",
+        how_to: "Settings > Messaging Channels > Telegram (connect), then message the bot",
         status: CapabilityStatus::Beta,
         privacy: None,
     },
@@ -869,6 +1019,50 @@ const CAPABILITIES: &[Capability] = &[
         privacy: LOCAL_RAW,
     },
     Capability {
+        id: "channels.mcp_registry_browse",
+        name: "Browse MCP Server Registry",
+        domain: "channels",
+        category: CapabilityCategory::Channels,
+        description: "Search and discover MCP servers from the Smithery.ai public registry.",
+        how_to: "Channels > MCP Servers > Browse Registry",
+        status: CapabilityStatus::Beta,
+        privacy: Some(CapabilityPrivacy {
+            leaves_device: true,
+            data_kind: PrivacyDataKind::Metadata,
+            destinations: &["Smithery.ai registry API"],
+        }),
+    },
+    Capability {
+        id: "channels.mcp_server_install",
+        name: "Install MCP Servers",
+        domain: "channels",
+        category: CapabilityCategory::Channels,
+        description: "Install MCP servers locally. Required env vars are stored encrypted and never included in logs or responses.",
+        how_to: "Channels > MCP Servers > Install",
+        status: CapabilityStatus::Beta,
+        privacy: LOCAL_CREDENTIALS,
+    },
+    Capability {
+        id: "channels.mcp_server_connect",
+        name: "Connect / Disconnect MCP Servers",
+        domain: "channels",
+        category: CapabilityCategory::Channels,
+        description: "Spawn and manage MCP server subprocesses via the stdio JSON-RPC protocol.",
+        how_to: "Channels > MCP Servers > Connect",
+        status: CapabilityStatus::Beta,
+        privacy: None,
+    },
+    Capability {
+        id: "channels.mcp_tool_call",
+        name: "Invoke MCP Server Tools",
+        domain: "channels",
+        category: CapabilityCategory::Channels,
+        description: "Call tools exposed by connected MCP servers. Results are surfaced to the agent.",
+        how_to: "Human > ask the assistant to use a tool from a connected MCP server",
+        status: CapabilityStatus::Beta,
+        privacy: None,
+    },
+    Capability {
         id: "settings.configure_ai",
         name: "Configure AI",
         domain: "settings",
@@ -876,6 +1070,16 @@ const CAPABILITIES: &[Capability] = &[
         description: "Adjust AI-related settings and agent behavior preferences.",
         how_to: "Settings > Developer Options > AI Configuration",
         status: CapabilityStatus::Stable,
+        privacy: None,
+    },
+    Capability {
+        id: "settings.persona_pack",
+        name: "Persona Pack",
+        domain: "settings",
+        category: CapabilityCategory::Settings,
+        description: "Personalize the assistant as one identity: set a display name and description, edit or reset the SOUL.md personality prompt, and reach mascot avatar and voice settings — all from a single Persona surface.",
+        how_to: "Settings > Persona",
+        status: CapabilityStatus::Beta,
         privacy: None,
     },
     Capability {
@@ -1038,16 +1242,6 @@ const CAPABILITIES: &[Capability] = &[
         status: CapabilityStatus::Beta,
         privacy: LOCAL_CREDENTIALS,
     },
-    Capability {
-        id: "automation.welcome_agent",
-        name: "Welcome Message",
-        domain: "automation",
-        category: CapabilityCategory::Automation,
-        description: "Conversational onboarding agent that learns about the user's intent and daily tools before guiding them through personalized setup.",
-        how_to: "Automatic — triggered once after onboarding.",
-        status: CapabilityStatus::Beta,
-        privacy: None,
-    },
     // ── Update ──────────────────────────────────────────────────────────────
     // ── Meet ────────────────────────────────────────────────────────────────
     Capability {
@@ -1086,6 +1280,47 @@ const CAPABILITIES: &[Capability] = &[
             destinations: &["Google Meet", "ElevenLabs (STT/TTS via hosted backend)"],
         }),
     },
+    // ── Mobile (iOS client) ─────────────────────────────────────────────────
+    Capability {
+        id: "mobile.device_pairing",
+        name: "Device Pairing",
+        domain: "devices",
+        category: CapabilityCategory::Mobile,
+        description: "Pair iOS phones with the desktop core via QR code. The desktop generates a \
+                      short-lived pairing token; the iOS app scans the QR, completes an X25519 \
+                      key agreement, and stores the session for reconnects.",
+        how_to: "Settings > Devices > Pair iPhone",
+        status: CapabilityStatus::Beta,
+        privacy: None,
+    },
+    Capability {
+        id: "mobile.ios_client",
+        name: "iOS Client",
+        domain: "devices",
+        category: CapabilityCategory::Mobile,
+        description: "iOS app for chatting with your assistant on the go. Connects to the desktop \
+                      core via LAN HTTP, an E2E-encrypted socket.io tunnel, or a cloud HTTP \
+                      fallback — no Rust core ships on the device.",
+        how_to: "Pair via Settings > Devices, then open the OpenHuman iOS app.",
+        status: CapabilityStatus::Beta,
+        privacy: None,
+    },
+    Capability {
+        id: "mobile.push_to_talk",
+        name: "Push-to-Talk",
+        domain: "devices",
+        category: CapabilityCategory::Mobile,
+        description: "Hold-to-talk voice input on iOS. Activates AVAudioEngine and \
+                      SFSpeechRecognizer on the device; partial transcripts appear while \
+                      speaking and the final transcript is sent as a chat message.",
+        how_to: "Hold the microphone button on the iOS mascot screen.",
+        status: CapabilityStatus::Beta,
+        privacy: Some(CapabilityPrivacy {
+            leaves_device: false,
+            data_kind: PrivacyDataKind::Raw,
+            destinations: &[],
+        }),
+    },
     // ── Update ──────────────────────────────────────────────────────────────
     Capability {
         id: "update.check",
@@ -1112,6 +1347,90 @@ const CAPABILITIES: &[Capability] = &[
         how_to: "Settings > Developer Options > Apply Update, or confirm an in-chat update prompt from the orchestrator.",
         status: CapabilityStatus::Beta,
         privacy: GITHUB_RELEASES_METADATA,
+    },
+    // ── Desktop Companion ────────────────────────────────────────────
+    Capability {
+        id: "companion.session",
+        name: "Desktop Companion Session",
+        domain: "desktop_companion",
+        category: CapabilityCategory::ScreenIntelligence,
+        description: "Start a Clicky-style companion session that ties hotkey activation, \
+                      microphone capture, screen context, LLM reasoning, speech synthesis, \
+                      and visual pointing into a single interaction loop.",
+        how_to: "Settings > Companion, or activate via the configured hotkey.",
+        status: CapabilityStatus::Beta,
+        privacy: DERIVED_TO_BACKEND,
+    },
+    Capability {
+        id: "companion.pointing",
+        name: "Visual Pointing",
+        domain: "desktop_companion",
+        category: CapabilityCategory::ScreenIntelligence,
+        description: "The companion LLM can embed [POINT:x,y:label:screenN] tags to \
+                      visually point at UI elements on screen via the overlay.",
+        how_to: "Automatic during companion sessions when the LLM identifies a UI target.",
+        status: CapabilityStatus::Beta,
+        privacy: None,
+    },
+    Capability {
+        id: "filesystem.access_mode",
+        name: "Agent OS Access Mode",
+        domain: "security",
+        category: CapabilityCategory::Settings,
+        description: "Choose how much filesystem and shell access the agent has: Read-Only, \
+                      Workspace, Trusted Roots (grant specific folders outside the workspace), \
+                      or Full Access. Credential stores stay blocked in every mode.",
+        how_to: "Settings → Agent OS access",
+        status: CapabilityStatus::Stable,
+        privacy: None,
+    },
+    Capability {
+        id: "security.always_allow_tool",
+        name: "Always Allow a Tool",
+        domain: "security",
+        category: CapabilityCategory::Settings,
+        description: "On an approval prompt, choose \"Always allow\" to stop being asked for that \
+                      tool. The choice is saved to your allow-list and persists across restarts; \
+                      remove it any time under Settings → Agent OS access to be prompted again. \
+                      Policy still blocks forbidden paths and high-risk commands regardless.",
+        how_to: "Click \"Always allow\" on an approval prompt; manage the list in Settings → Agent OS access.",
+        status: CapabilityStatus::Stable,
+        privacy: None,
+    },
+    Capability {
+        id: "tool.detect_tools",
+        name: "Detect Installed Tools",
+        domain: "tools",
+        category: CapabilityCategory::Settings,
+        description: "Probe the host PATH to report which developer tools and language \
+                      runtimes are installed (node, python, cargo, docker, git, …).",
+        how_to: "Used by the agent automatically; gated by the tool toggle list.",
+        status: CapabilityStatus::Stable,
+        privacy: None,
+    },
+    Capability {
+        id: "tool.install_tool",
+        name: "Install OS Packages",
+        domain: "tools",
+        category: CapabilityCategory::Settings,
+        description: "Install OS or language packages (apt/dnf/brew/winget/pipx/npm/cargo). \
+                      High impact: only available when Full access / tool installation is enabled.",
+        how_to: "Enable in Settings → Agent OS access (Full access mode).",
+        status: CapabilityStatus::Beta,
+        privacy: None,
+    },
+    Capability {
+        id: "intelligence.remember_preferences",
+        name: "Remember Preferences",
+        domain: "memory",
+        category: CapabilityCategory::Intelligence,
+        description: "Remember preferences you state in chat and apply them automatically — \
+                      general preferences shape every reply (tone, language, standing habits); \
+                      situational ones surface only when relevant to your current message.",
+        how_to: "State a preference in chat, e.g. \"always reply in British English\" or \
+                 \"when writing Rust, prefer Result over unwrap\".",
+        status: CapabilityStatus::Stable,
+        privacy: LOCAL_RAW,
     },
 ];
 
