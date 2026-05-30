@@ -354,6 +354,9 @@ describe('AIPanel', () => {
     );
     // The input for the API key should be visible.
     expect(screen.getByLabelText(/API key/i)).toBeInTheDocument();
+    // The OpenAI dialog also exposes the "Sign in with ChatGPT" OAuth surface.
+    expect(screen.getByTestId('settings-openai-oauth-section')).toBeInTheDocument();
+    expect(screen.getByTestId('settings-openai-oauth-connect')).toBeInTheDocument();
   });
 
   it('surfaces provider setup errors in an alert with technical details collapsed', async () => {
