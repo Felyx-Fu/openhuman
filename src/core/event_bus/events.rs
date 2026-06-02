@@ -76,6 +76,44 @@ pub enum DomainEvent {
         agent_id: String,
         error: String,
     },
+    /// A sub-agent called `ask_user_clarification` and paused, waiting
+    /// for the orchestrator to relay the user's answer via
+    /// `continue_subagent`.
+    SubagentAwaitingUser {
+        parent_session: String,
+        task_id: String,
+        agent_id: String,
+        question: String,
+    },
+    /// High-level orchestration accepted a child agent for execution.
+    AgentOrchestrationSpawned {
+        session_id: String,
+        orchestration_id: String,
+        agent_id: String,
+        parent_agent_id: Option<String>,
+    },
+    /// High-level orchestration observed a child agent completion.
+    AgentOrchestrationCompleted {
+        session_id: String,
+        orchestration_id: String,
+        agent_id: String,
+        elapsed_ms: u64,
+        output_chars: usize,
+        iterations: usize,
+    },
+    /// High-level orchestration observed a child agent failure.
+    AgentOrchestrationFailed {
+        session_id: String,
+        orchestration_id: String,
+        agent_id: String,
+        error: String,
+    },
+    /// High-level orchestration closed or cancelled a child agent.
+    AgentOrchestrationClosed {
+        session_id: String,
+        orchestration_id: String,
+        reason: Option<String>,
+    },
 
     // ── Memory ──────────────────────────────────────────────────────────
     /// The configured embedding provider is unreachable or the requested model
@@ -280,6 +318,12 @@ pub enum DomainEvent {
     /// Agent attempted a tool call that produces an external side
     /// effect; awaiting user approval. Published by `ApprovalGate`
     /// before parking the tool-call future. Issue #1339.
+    ///
+    /// Note: this variant intentionally does not carry a `session_id`.
+    /// Session provenance is internal to `ApprovalGate`; downstream
+    /// surfaces (frontend approval card, audit log readers, web channel
+    /// bridge) only need the request correlation id plus optional chat
+    /// thread/client routing.
     ApprovalRequested {
         /// Unique id used to correlate the decision back to the
         /// parked future.
@@ -291,9 +335,6 @@ pub enum DomainEvent {
         action_summary: String,
         /// Redacted JSON arguments — also stripped of raw user content.
         args_redacted: serde_json::Value,
-        /// Session id binding the request to the current core launch
-        /// so stale approvals cannot be replayed after restart.
-        session_id: String,
         /// Chat thread the gated call belongs to, when the turn originated
         /// from a chat channel — lets the web channel route a `yes`/`no`
         /// reply back to this request. `None` for non-chat callers.
@@ -309,6 +350,52 @@ pub enum DomainEvent {
         tool_name: String,
         /// `"approve_once"`, `"approve_always_for_tool"`, or `"deny"`.
         decision: String,
+    },
+
+    // ── Artifacts ───────────────────────────────────────────────────────
+    /// An artifact transitioned to [`ArtifactStatus::Ready`] — file
+    /// is on disk and ready to be downloaded. Published by
+    /// [`crate::openhuman::artifacts::store::finalize_artifact`].
+    /// Bridged to the web channel as an `artifact_ready` socket event
+    /// when the publishing turn carries an `APPROVAL_CHAT_CONTEXT`
+    /// (see [`crate::openhuman::approval::ApprovalChatContext`]).
+    /// Sub-task #2779 of #1535.
+    ArtifactReady {
+        /// UUID of the artifact record.
+        artifact_id: String,
+        /// Lowercase variant of `ArtifactKind` (`presentation`,
+        /// `document`, `image`, `other`).
+        kind: String,
+        /// Human-readable title (also the on-disk filename stem).
+        title: String,
+        /// Relative path under `<workspace>/artifacts/`, e.g.
+        /// `"<uuid>/deck.pptx"`. The absolute path is reachable via
+        /// `ai_get_artifact` so the renderer never needs the
+        /// workspace root.
+        path: String,
+        /// Final on-disk file size in bytes.
+        size_bytes: u64,
+        /// Chat thread the artifact belongs to, when the producing
+        /// turn carried an `APPROVAL_CHAT_CONTEXT`. `None` for CLI /
+        /// cron / sub-agent paths — no client to fan out to.
+        thread_id: Option<String>,
+        /// Socket.IO client id (room) to surface the card to, when
+        /// known. `None` for non-chat callers.
+        client_id: Option<String>,
+    },
+    /// An artifact transitioned to [`ArtifactStatus::Failed`] — the
+    /// producer surfaced a reason and the UI should render a
+    /// retry-hint card instead of a download. Bridged the same way
+    /// as [`Self::ArtifactReady`]. Sub-task #2779 of #1535.
+    ArtifactFailed {
+        artifact_id: String,
+        kind: String,
+        title: String,
+        /// Producer-supplied failure reason. Already truncated by the
+        /// producer (e.g. `PresentationError::truncate_stderr`).
+        error: String,
+        thread_id: Option<String>,
+        client_id: Option<String>,
     },
 
     // ── Webhooks ────────────────────────────────────────────────────────
@@ -371,6 +458,11 @@ pub enum DomainEvent {
         toolkit: String,
         connection_id: String,
     },
+    /// The connected Composio toolkit set changed (connect/revoke/config flip).
+    ///
+    /// `toolkits` is the currently-active, sanitised slug list that should
+    /// drive orchestrator delegation schema rebuilds.
+    ComposioIntegrationsChanged { toolkits: Vec<String> },
     /// A Composio action was executed (success or failure) via the backend.
     ComposioActionExecuted {
         tool: String,
@@ -455,6 +547,23 @@ pub enum DomainEvent {
     },
     /// A full tree rebuild completed.
     TreeSummarizerRebuildCompleted { namespace: String, total_nodes: u64 },
+
+    /// Fine-grained progress during the memory tree build pipeline.
+    /// Emitted at each sub-phase so the frontend can show detailed status.
+    MemoryTreeBuildProgress {
+        /// Which phase: "extract", "append", "seal", "flush", "embed"
+        phase: String,
+        /// Sub-step within the phase (e.g. "loading", "summarising", "persisting")
+        step: String,
+        /// Tree scope when available (e.g. "github:org/repo")
+        tree_scope: Option<String>,
+        /// Tree level being processed (0 = leaves, 1+ = summaries)
+        level: Option<u32>,
+        /// Number of items being processed in this step
+        item_count: Option<u32>,
+        /// Human-readable detail
+        detail: Option<String>,
+    },
 
     // ── Notification ────────────────────────────────────────────────────
     /// An integration notification was ingested from an embedded webview.
@@ -620,6 +729,17 @@ pub enum DomainEvent {
     /// A component restart was observed.
     HealthRestarted { component: String },
 
+    // ── Keyring ─────────────────────────────────────────────────────────
+    /// The OS keyring is unavailable and no user consent for local fallback
+    /// has been recorded. Published once (deduplicated) when a secret
+    /// operation hits the consent gate. The frontend surfaces a consent
+    /// dialog in response.
+    KeyringConsentRequired,
+    /// A secret field failed to decrypt (rotated master key, corrupted
+    /// ciphertext, keychain reset). Published so the frontend can surface
+    /// a recovery prompt instead of silently clearing the field.
+    KeyringDecryptFailed { field_name: String, reason: String },
+
     // ── Auth ────────────────────────────────────────────────────────────
     /// The local app session is no longer valid — typically detected when
     /// the backend returns 401 to an LLM inference call or a JSON-RPC
@@ -656,6 +776,18 @@ pub enum DomainEvent {
         provider: String,
         error: String,
     },
+    /// A task-board card needs human plan approval before the dispatcher will
+    /// execute it (emitted when `autonomy.require_task_plan_approval` is on and
+    /// the dispatcher parks a `todo` card at `awaiting_approval`).
+    ///
+    /// Surfacing: the parked card is persisted with status `awaiting_approval`,
+    /// so the kanban board renders it with inline Approve/Reject on the next
+    /// board fetch/refresh — that is the current (poll-based) surface and the
+    /// reason this telemetry event has no dedicated subscriber yet. A realtime
+    /// socket bridge (à la `ApprovalRequested` → `approval_request`) is a
+    /// deliberate follow-up; emitting the event now lets that bridge attach
+    /// without a schema change.
+    TaskPlanAwaitingApproval { card_id: String, thread_id: String },
 }
 
 impl DomainEvent {
@@ -667,7 +799,12 @@ impl DomainEvent {
             | Self::AgentError { .. }
             | Self::SubagentSpawned { .. }
             | Self::SubagentCompleted { .. }
-            | Self::SubagentFailed { .. } => "agent",
+            | Self::SubagentFailed { .. }
+            | Self::SubagentAwaitingUser { .. }
+            | Self::AgentOrchestrationSpawned { .. }
+            | Self::AgentOrchestrationCompleted { .. }
+            | Self::AgentOrchestrationFailed { .. }
+            | Self::AgentOrchestrationClosed { .. } => "agent",
 
             Self::EmbeddingModelUnhealthy { .. }
             | Self::MemoryStored { .. }
@@ -709,6 +846,7 @@ impl DomainEvent {
             Self::ComposioTriggerReceived { .. }
             | Self::ComposioConnectionCreated { .. }
             | Self::ComposioConnectionDeleted { .. }
+            | Self::ComposioIntegrationsChanged { .. }
             | Self::ComposioActionExecuted { .. }
             | Self::ComposioConfigChanged { .. } => "composio",
 
@@ -718,7 +856,8 @@ impl DomainEvent {
 
             Self::TreeSummarizerHourCompleted { .. }
             | Self::TreeSummarizerPropagated { .. }
-            | Self::TreeSummarizerRebuildCompleted { .. } => "tree_summarizer",
+            | Self::TreeSummarizerRebuildCompleted { .. }
+            | Self::MemoryTreeBuildProgress { .. } => "tree_summarizer",
 
             Self::NotificationIngested { .. } | Self::NotificationTriaged { .. } => "notification",
 
@@ -741,13 +880,19 @@ impl DomainEvent {
             | Self::HealthChanged { .. }
             | Self::HealthRestarted { .. } => "system",
 
+            Self::KeyringConsentRequired | Self::KeyringDecryptFailed { .. } => "keyring",
+
             Self::SessionExpired { .. } => "auth",
 
             Self::TaskSourceFetched { .. }
             | Self::TaskSourceTaskIngested { .. }
             | Self::TaskSourceFetchFailed { .. } => "task_sources",
 
+            Self::TaskPlanAwaitingApproval { .. } => "agent",
+
             Self::ApprovalRequested { .. } | Self::ApprovalDecided { .. } => "approval",
+
+            Self::ArtifactReady { .. } | Self::ArtifactFailed { .. } => "artifact",
 
             Self::McpServerInstalled { .. }
             | Self::McpServerConnected { .. }
@@ -766,6 +911,11 @@ impl DomainEvent {
             Self::SubagentSpawned { .. } => "SubagentSpawned",
             Self::SubagentCompleted { .. } => "SubagentCompleted",
             Self::SubagentFailed { .. } => "SubagentFailed",
+            Self::SubagentAwaitingUser { .. } => "SubagentAwaitingUser",
+            Self::AgentOrchestrationSpawned { .. } => "AgentOrchestrationSpawned",
+            Self::AgentOrchestrationCompleted { .. } => "AgentOrchestrationCompleted",
+            Self::AgentOrchestrationFailed { .. } => "AgentOrchestrationFailed",
+            Self::AgentOrchestrationClosed { .. } => "AgentOrchestrationClosed",
             Self::MemoryStored { .. } => "MemoryStored",
             Self::MemoryRecalled { .. } => "MemoryRecalled",
             Self::MemorySyncRequested { .. } => "MemorySyncRequested",
@@ -799,6 +949,7 @@ impl DomainEvent {
             Self::ComposioTriggerReceived { .. } => "ComposioTriggerReceived",
             Self::ComposioConnectionCreated { .. } => "ComposioConnectionCreated",
             Self::ComposioConnectionDeleted { .. } => "ComposioConnectionDeleted",
+            Self::ComposioIntegrationsChanged { .. } => "ComposioIntegrationsChanged",
             Self::ComposioActionExecuted { .. } => "ComposioActionExecuted",
             Self::ComposioConfigChanged { .. } => "ComposioConfigChanged",
             Self::TriggerEvaluated { .. } => "TriggerEvaluated",
@@ -807,6 +958,7 @@ impl DomainEvent {
             Self::TreeSummarizerHourCompleted { .. } => "TreeSummarizerHourCompleted",
             Self::TreeSummarizerPropagated { .. } => "TreeSummarizerPropagated",
             Self::TreeSummarizerRebuildCompleted { .. } => "TreeSummarizerRebuildCompleted",
+            Self::MemoryTreeBuildProgress { .. } => "MemoryTreeBuildProgress",
             Self::NotificationIngested { .. } => "NotificationIngested",
             Self::NotificationTriaged { .. } => "NotificationTriaged",
             Self::DevicePaired { .. } => "DevicePaired",
@@ -825,9 +977,13 @@ impl DomainEvent {
             Self::AutonomyConfigChanged => "AutonomyConfigChanged",
             Self::HealthChanged { .. } => "HealthChanged",
             Self::HealthRestarted { .. } => "HealthRestarted",
+            Self::KeyringConsentRequired => "KeyringConsentRequired",
+            Self::KeyringDecryptFailed { .. } => "KeyringDecryptFailed",
             Self::SessionExpired { .. } => "SessionExpired",
             Self::ApprovalRequested { .. } => "ApprovalRequested",
             Self::ApprovalDecided { .. } => "ApprovalDecided",
+            Self::ArtifactReady { .. } => "ArtifactReady",
+            Self::ArtifactFailed { .. } => "ArtifactFailed",
             Self::McpServerInstalled { .. } => "McpServerInstalled",
             Self::McpServerConnected { .. } => "McpServerConnected",
             Self::McpServerDisconnected { .. } => "McpServerDisconnected",
@@ -837,6 +993,7 @@ impl DomainEvent {
             Self::TaskSourceFetched { .. } => "TaskSourceFetched",
             Self::TaskSourceTaskIngested { .. } => "TaskSourceTaskIngested",
             Self::TaskSourceFetchFailed { .. } => "TaskSourceFetchFailed",
+            Self::TaskPlanAwaitingApproval { .. } => "TaskPlanAwaitingApproval",
         }
     }
 
@@ -848,7 +1005,14 @@ impl DomainEvent {
             | Self::AgentError { session_id, .. } => Some(session_id.as_str()),
             Self::SubagentSpawned { agent_id, .. }
             | Self::SubagentCompleted { agent_id, .. }
-            | Self::SubagentFailed { agent_id, .. } => Some(agent_id.as_str()),
+            | Self::SubagentFailed { agent_id, .. }
+            | Self::SubagentAwaitingUser { agent_id, .. }
+            | Self::AgentOrchestrationSpawned { agent_id, .. }
+            | Self::AgentOrchestrationCompleted { agent_id, .. }
+            | Self::AgentOrchestrationFailed { agent_id, .. } => Some(agent_id.as_str()),
+            Self::AgentOrchestrationClosed {
+                orchestration_id, ..
+            } => Some(orchestration_id.as_str()),
             Self::ChannelMessageReceived { channel, .. }
             | Self::ChannelConnected { channel, .. }
             | Self::ChannelDisconnected { channel, .. } => Some(channel.as_str()),

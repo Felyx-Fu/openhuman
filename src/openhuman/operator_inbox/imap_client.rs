@@ -1,11 +1,10 @@
 //! IMAP/SMTP types and algorithms for operator inbox.
 //!
-//! **Phase 1 scope**: Config types, JWZ threading algorithm, LLM prompt builders,
-//! validation, and deadline extraction — all pure logic with no network I/O.
+//! Config types, fetched-message types, JWZ threading, LLM prompt builders,
+//! validation, and deadline extraction.
 //!
-//! **Phase 2 (follow-up PR)**: Wire `async-imap` for IDLE-based email fetching
-//! and `lettre` for SMTP sending. The types and algorithms here are designed to
-//! slot directly into that integration without breaking changes.
+//! Live IMAP fetching and SMTP sending live in `connection.rs`; background
+//! polling lives in `poller.rs`.
 //!
 //! ## Log prefix
 //!
