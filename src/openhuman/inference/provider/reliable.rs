@@ -1047,6 +1047,11 @@ impl Provider for ReliableProvider {
                     }
                     Some(Err(ref e)) => {
                         let non_retryable = is_stream_error_non_retryable(e);
+                        let session_expired = matches!(
+                            e,
+                            super::traits::StreamError::Provider(message)
+                                if crate::core::observability::is_session_expired_message(message)
+                        );
 
                         tracing::warn!(
                             provider = provider_name,
@@ -1055,13 +1060,14 @@ impl Provider for ReliableProvider {
                             "Streaming failed{}", if non_retryable { " (non-retryable)" } else { "" }
                         );
 
-                        if non_retryable {
+                        if session_expired {
                             let _ = tx
                                 .send(Err(super::traits::StreamError::Provider(e.to_string())))
                                 .await;
                             return;
                         }
-                        // Retryable — try the next candidate provider/model.
+                        // Candidate failed before yielding data. Do not poll the
+                        // same stream again; move to next provider/model.
                     }
                     None => {
                         // Stream exhausted without yielding any chunks.
