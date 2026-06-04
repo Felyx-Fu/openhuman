@@ -149,6 +149,7 @@ pub fn all_tools_with_runtime(
         // returns a single text result. See
         // `agent::harness::subagent_runner` for the dispatch path.
         Box::new(SpawnSubagentTool::new()),
+        Box::new(SpawnAsyncSubagentTool::new()),
         Box::new(ContinueSubagentTool::new()),
         Box::new(SpawnParallelAgentsTool::new()),
         Box::new(DelegateToPersonalityTool::new()),
@@ -158,6 +159,11 @@ pub fn all_tools_with_runtime(
         // build-mode pass. The plan→build mode switch itself is a
         // follow-up; the tool emits a stable marker today.
         Box::new(TodoTool::new()),
+        // Move/update a specific task card by id on a target board (defaults to
+        // the proactive `task-sources` board) — lets the agent advance the task
+        // it's working (in_progress / done+evidence / blocked+reason) from any
+        // thread, complementing `todo` which only touches the current thread.
+        Box::new(UpdateTaskTool::new()),
         Box::new(PlanExitTool::new()),
         // Skill chaining: let an in-flight autonomous skill (e.g.
         // `github-issue-crusher`) kick off another bundled skill_run as a
@@ -168,6 +174,16 @@ pub fn all_tools_with_runtime(
         // and tool callers share one spawn path.
         Box::new(RunSkillTool::new()),
         Box::new(CurrentTimeTool::new()),
+        Box::new(LaunchAppTool::new()),
+        Box::new(AxInteractTool::new(
+            root_config.computer_control.ax_interact_mutations,
+        )),
+        // Multi-step UI automation in one call. Shares the ax_interact opt-in
+        // (mutations) and sensitive-app denylist; runs a Rust perceive→act→verify
+        // loop with a fast model so the chat model stays out of the click loop.
+        Box::new(AutomateTool::new(
+            root_config.computer_control.ax_interact_mutations,
+        )),
         Box::new(CodegraphIndexTool::new(
             config.clone(),
             action_dir.to_path_buf(),
@@ -195,6 +211,9 @@ pub fn all_tools_with_runtime(
         Box::new(MemoryStoreTool::new(memory.clone(), security.clone())),
         Box::new(MemoryRecallTool::new(memory.clone())),
         Box::new(MemoryForgetTool::new(memory.clone(), security.clone())),
+        // #002: read-only self-diagnosis of the memory pipeline so the agent
+        // can explain an empty/stalled wiki + the fix.
+        Box::new(MemoryDoctorTool::new(config.clone())),
         Box::new(MemoryQueryTool),
         Box::new(MemoryQueryWalkTool),
         Box::new(SmartMemoryWalkTool),
@@ -211,6 +230,14 @@ pub fn all_tools_with_runtime(
         // per-query recall). Written verbatim to user_pref_{general,situational};
         // bypasses the inference/stability pipeline. Always registered.
         Box::new(SavePreferenceTool::new(memory.clone(), security.clone())),
+        Box::new(MonitorTool::new(
+            security.clone(),
+            Arc::clone(&runtime),
+            Arc::clone(&audit),
+        )),
+        Box::new(MonitorListTool),
+        Box::new(MonitorStopTool),
+        Box::new(MonitorReadTool),
         // WhatsApp data store — read-only agent surface (issue #1341).
         // The matching `whatsapp_data_ingest` write-path stays internal-only
         // (registered in `src/core/all.rs::build_internal_only_controllers`)
@@ -453,6 +480,7 @@ pub fn all_tools_with_runtime(
     // registered.
     tools.push(Box::new(PresentationTool::new(
         root_config.workspace_dir.clone(),
+        security.clone(),
     )));
 
     if browser_config.enabled {

@@ -222,6 +222,9 @@ export interface ArtifactSnapshot {
   updatedAt: number;
 }
 
+/** Queue behavior when a turn is already in flight for a thread. */
+export type QueueMode = 'interrupt' | 'steer' | 'followup' | 'collect';
+
 /**
  * Per-thread UI state for an in-flight agent turn (socket events while the user
  * may navigate away from Conversations). The thread slice keeps `activeThreadId`
@@ -243,6 +246,16 @@ interface ChatRuntimeState {
    */
   artifactsByThread: Record<string, ArtifactSnapshot[]>;
   sessionTokenUsage: SessionTokenUsage;
+  queueStatusByThread: Record<string, QueueStatus>;
+}
+
+/** Snapshot of the active-run queue depth per lane. */
+export interface QueueStatus {
+  active: boolean;
+  steers: number;
+  followups: number;
+  collects: number;
+  total: number;
 }
 
 const initialState: ChatRuntimeState = {
@@ -254,6 +267,7 @@ const initialState: ChatRuntimeState = {
   pendingApprovalByThread: {},
   artifactsByThread: {},
   sessionTokenUsage: { inputTokens: 0, outputTokens: 0, turns: 0, lastUpdated: 0 },
+  queueStatusByThread: {},
 };
 
 /**
@@ -562,6 +576,35 @@ const chatRuntimeSlice = createSlice({
     clearArtifactsForThread: (state, action: PayloadAction<{ threadId: string }>) => {
       delete state.artifactsByThread[action.payload.threadId];
     },
+    /**
+     * Remove a single artifact entry from a thread's ledger (#3024). Used
+     * by the Files panel's per-row Delete affordance: caller dispatches
+     * this optimistically, then fires `openhuman.ai_delete_artifact` and
+     * re-upserts the snapshot on RPC failure. No-op if either the thread
+     * or the artifactId is unknown.
+     */
+    removeArtifactForThread: (
+      state,
+      action: PayloadAction<{ threadId: string; artifactId: string }>
+    ) => {
+      const bucket = state.artifactsByThread[action.payload.threadId];
+      if (!bucket) return;
+      const next = bucket.filter(entry => entry.artifactId !== action.payload.artifactId);
+      if (next.length === 0) {
+        delete state.artifactsByThread[action.payload.threadId];
+      } else {
+        state.artifactsByThread[action.payload.threadId] = next;
+      }
+    },
+    setQueueStatusForThread: (
+      state,
+      action: PayloadAction<{ threadId: string; status: QueueStatus }>
+    ) => {
+      state.queueStatusByThread[action.payload.threadId] = action.payload.status;
+    },
+    clearQueueStatusForThread: (state, action: PayloadAction<{ threadId: string }>) => {
+      delete state.queueStatusByThread[action.payload.threadId];
+    },
     beginInferenceTurn: (state, action: PayloadAction<{ threadId: string }>) => {
       state.inferenceTurnLifecycleByThread[action.payload.threadId] = 'started';
     },
@@ -580,6 +623,7 @@ const chatRuntimeSlice = createSlice({
       delete state.taskBoardByThread[action.payload.threadId];
       delete state.inferenceTurnLifecycleByThread[action.payload.threadId];
       delete state.pendingApprovalByThread[action.payload.threadId];
+      delete state.queueStatusByThread[action.payload.threadId];
       // Note: artifactsByThread intentionally NOT cleared here. The
       // ArtifactCard renders inline in the message timeline, so the
       // snapshot needs to survive turn boundaries — historic artifacts
@@ -594,6 +638,7 @@ const chatRuntimeSlice = createSlice({
       state.inferenceTurnLifecycleByThread = {};
       state.pendingApprovalByThread = {};
       state.artifactsByThread = {};
+      state.queueStatusByThread = {};
     },
     recordChatTurnUsage: (
       state,
@@ -687,6 +732,9 @@ export const {
   upsertArtifactReadyForThread,
   upsertArtifactFailedForThread,
   clearArtifactsForThread,
+  removeArtifactForThread,
+  setQueueStatusForThread,
+  clearQueueStatusForThread,
   beginInferenceTurn,
   markInferenceTurnStreaming,
   endInferenceTurn,

@@ -329,9 +329,12 @@ pub async fn start_channels(mut config: Config) -> Result<()> {
     )?;
     let temperature = config.default_temperature;
     let local_embedding = config.workload_local_model("embeddings");
+    let embedding_api_key =
+        crate::openhuman::embeddings::resolve_api_key(&config, &config.memory.embedding_provider);
     let mem: Arc<dyn Memory> = Arc::from(memory_store::create_memory_with_local_ai(
         &config.memory,
         local_embedding.as_deref(),
+        &embedding_api_key,
         &[],
         Some(&config.storage.provider.config),
         &config.workspace_dir,
@@ -725,6 +728,23 @@ pub async fn start_channels(mut config: Config) -> Result<()> {
             ),
         ));
         tracing::debug!("[telegram-remote] registered TelegramRemoteSubscriber");
+        Some(handle)
+    } else {
+        None
+    };
+    // Sub-issue 2 of #3098: when Telegram is enabled, register the
+    // approval-surface subscriber so `Prompt`-class tool calls actually
+    // get gated for the user instead of silently allowed (the legacy
+    // behavior when `ApprovalChatContext` is unset). The dispatch loop
+    // pairs this by scoping each Telegram turn in an `ApprovalChatContext`
+    // and intercepting `yes`/`no` replies for parked approvals.
+    let _telegram_approval_surface_handle = if channels_by_name.contains_key("telegram") {
+        let handle = bus.subscribe(Arc::new(
+            crate::openhuman::channels::providers::telegram::TelegramApprovalSurfaceSubscriber::new(
+                Arc::clone(&channels_by_name),
+            ),
+        ));
+        tracing::debug!("[telegram-approval] registered TelegramApprovalSurfaceSubscriber");
         Some(handle)
     } else {
         None

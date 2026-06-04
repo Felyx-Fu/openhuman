@@ -466,6 +466,7 @@ Kitchen is north of Garden.
                 category: "core".into(),
                 session_id: Some("session-coverage".into()),
                 document_id: Some("doc-memory-raw-ingestion".into()),
+                taint: openhuman_core::openhuman::memory::MemoryTaint::Internal,
             },
             config: MemoryIngestionConfig::default(),
         })
@@ -535,6 +536,7 @@ Kitchen is north of Garden.
                 category: "core".into(),
                 session_id: None,
                 document_id: Some("doc-memory-raw-ingestion".into()),
+                taint: openhuman_core::openhuman::memory::MemoryTaint::Internal,
             },
             &MemoryIngestionConfig {
                 extraction_mode: openhuman_core::openhuman::memory::ExtractionMode::Chunk,
@@ -1949,6 +1951,8 @@ fn memory_retrieval_embedding_and_rpc_model_helpers_round_trip() {
         sealed_at: now,
         deleted: false,
         embedding: None,
+        doc_id: None,
+        version_ms: None,
     };
     let tree = Tree {
         id: "tree-1".into(),
@@ -2056,6 +2060,7 @@ fn memory_retrieval_embedding_and_rpc_model_helpers_round_trip() {
         timestamp: now.to_rfc3339(),
         session_id: Some("session-1".into()),
         score: Some(0.9),
+        taint: Default::default(),
     };
     assert_eq!(entry.category.to_string(), "testing");
     let opts = RecallOpts {
@@ -3044,6 +3049,8 @@ async fn memory_sync_provider_trait_defaults_and_connection_hook_are_determinist
         toolkit: "raw_coverage".into(),
         connection_id: Some("conn-1".into()),
         usage: Default::default(),
+        max_items: None,
+        sync_depth_days: None,
     };
     let provider = RawCoverageProvider { fail_profile: true };
     assert_eq!(provider.sync_interval_secs(), Some(15 * 60));
@@ -4614,14 +4621,16 @@ async fn tree_summarizer_ops_cover_validation_query_and_local_provider_guards() 
         )
         .await
         .unwrap_err();
-    assert!(provider_guard.contains("local_ai"));
+    // No local AI + cloud-summarization opt-in defaults off ⇒ the guard names the
+    // local-AI remediation in user-facing prose ("enable local AI ...").
+    assert!(provider_guard.contains("local AI"));
     let rebuild_guard =
         openhuman_core::openhuman::memory_tree::tree_runtime::ops::tree_summarizer_rebuild(
             &config, "ops_ns",
         )
         .await
         .unwrap_err();
-    assert!(rebuild_guard.contains("local_ai"));
+    assert!(rebuild_guard.contains("local AI"));
 }
 
 #[tokio::test]

@@ -70,6 +70,53 @@ pub fn generation() -> u64 {
         .map_or(0, |s| s.generation.load(Ordering::Relaxed))
 }
 
+/// Swap in a new `action_dir` and rebuild the live policy around it,
+/// bumping the generation counter. Used by
+/// [`config_set_action_dir`](crate::openhuman::config::ops::set_action_dir)
+/// (issue #3240) so a Settings-driven change of the agent's writable root
+/// takes effect immediately instead of waiting for the next session.
+///
+/// Returns the new generation on success, or `Err` if no policy is
+/// installed yet (typically a CLI-only invocation that never started a
+/// session runtime).
+pub fn update_action_dir(new_action_dir: PathBuf) -> Result<u64, String> {
+    let Some(state) = STATE.get() else {
+        return Err(
+            "[security:live_policy] no policy installed yet — cannot update action_dir".into(),
+        );
+    };
+    {
+        let mut guard = state
+            .action_dir
+            .write()
+            .map_err(|e| format!("[security:live_policy] action_dir lock poisoned: {e}"))?;
+        *guard = new_action_dir.clone();
+    }
+    // Rebuild the policy by cloning the current one and swapping the
+    // action_dir field. This preserves the entire autonomy + trusted_roots
+    // + forbidden_paths state — the only thing changing is the sandbox root.
+    let current_policy = state
+        .policy
+        .read()
+        .map(|g| Arc::clone(&g))
+        .map_err(|e| format!("[security:live_policy] policy lock poisoned: {e}"))?;
+    let mut rebuilt: SecurityPolicy = (*current_policy).clone();
+    rebuilt.action_dir = new_action_dir;
+    {
+        let mut guard = state
+            .policy
+            .write()
+            .map_err(|e| format!("[security:live_policy] policy write lock poisoned: {e}"))?;
+        *guard = Arc::new(rebuilt);
+    }
+    let gen = state.generation.fetch_add(1, Ordering::Relaxed) + 1;
+    tracing::info!(
+        generation = gen,
+        "[security:live_policy] SecurityPolicy reloaded after action_dir change"
+    );
+    Ok(gen)
+}
+
 /// Rebuild the policy from `autonomy_config` against the stored workspace dir
 /// and swap it in, bumping the generation counter. No-op if nothing has been
 /// installed yet (e.g. a CLI invocation that never started a session runtime).
@@ -100,6 +147,64 @@ pub fn reload_from(autonomy_config: &crate::openhuman::config::AutonomyConfig) {
         generation = gen,
         "[security:live_policy] SecurityPolicy reloaded after autonomy config change"
     );
+}
+
+/// Swap the agent action sandbox root on the process-global live policy.
+///
+/// Updates the stored `action_dir` (so a subsequent [`reload_from`] keeps the
+/// new root) and rebuilds the current policy with `new` as its `action_dir`,
+/// bumping the generation counter. Unlike [`reload_from`], this does not need
+/// the `[autonomy]` block: it clones the in-flight policy and swaps only the
+/// action root, preserving every other access setting. No-op if nothing has
+/// been [`install`]ed yet.
+///
+/// Used by `config::update_agent_paths` so a UI-set action directory takes
+/// effect for new sessions immediately, without a core restart.
+pub fn set_action_dir(new: PathBuf) {
+    let Some(state) = STATE.get() else {
+        tracing::debug!(
+            "[security:live_policy] set_action_dir called before install; no live policy to swap"
+        );
+        return;
+    };
+
+    if let Ok(mut guard) = state.action_dir.write() {
+        *guard = new.clone();
+    }
+
+    let rebuilt = match state.policy.read() {
+        Ok(current) => Some({
+            let mut next = (**current).clone();
+            next.action_dir = new.clone();
+            Arc::new(next)
+        }),
+        Err(_) => {
+            tracing::warn!(
+                action_dir = %new.display(),
+                "[security:live_policy] set_action_dir: policy read lock poisoned; \
+                 action_dir stored but live policy not swapped — next reload_from will reconcile"
+            );
+            None
+        }
+    };
+
+    if let Some(rebuilt) = rebuilt {
+        if let Ok(mut guard) = state.policy.write() {
+            *guard = rebuilt;
+        } else {
+            tracing::warn!(
+                action_dir = %new.display(),
+                "[security:live_policy] set_action_dir: policy write lock poisoned; \
+                 rebuilt policy discarded — next reload_from will reconcile"
+            );
+        }
+        let generation = state.generation.fetch_add(1, Ordering::Relaxed) + 1;
+        tracing::info!(
+            generation,
+            action_dir = %new.display(),
+            "[security:live_policy] SecurityPolicy action_dir swapped after agent-paths change"
+        );
+    }
 }
 
 #[cfg(test)]
@@ -142,6 +247,62 @@ mod tests {
         assert_eq!(
             current().expect("policy still installed").autonomy,
             AutonomyLevel::Full
+        );
+    }
+
+    #[test]
+    fn set_action_dir_swaps_root_and_bumps_generation() {
+        // Same process-global lock as the reload test — these install/swap the
+        // shared live policy and would race each other otherwise.
+        let _env = crate::openhuman::config::TEST_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let workspace = std::env::temp_dir().join("openhuman_set_action_dir_test_ws");
+        let action = std::env::temp_dir().join("openhuman_set_action_dir_test_action_a");
+        let initial = Arc::new(SecurityPolicy {
+            autonomy: AutonomyLevel::Full,
+            workspace_dir: workspace.clone(),
+            action_dir: action.clone(),
+            ..SecurityPolicy::default()
+        });
+        install(initial, workspace.clone(), action.clone());
+
+        assert_eq!(
+            current().expect("policy installed").action_dir,
+            action,
+            "precondition: action_dir starts at the installed value"
+        );
+
+        let before = generation();
+        let new_action = std::env::temp_dir().join("openhuman_set_action_dir_test_action_b");
+        set_action_dir(new_action.clone());
+
+        assert!(
+            generation() > before,
+            "generation must increase on action_dir swap"
+        );
+        // A subsequent policy query reflects the new root...
+        assert_eq!(
+            current().expect("policy still installed").action_dir,
+            new_action,
+            "live policy must reflect the new action_dir"
+        );
+        // ...and unrelated access settings are preserved (not reset to default).
+        assert_eq!(
+            current().expect("policy still installed").autonomy,
+            AutonomyLevel::Full,
+            "autonomy level must survive an action_dir swap"
+        );
+        // The stored action_dir is updated so a later reload keeps the new root.
+        let cfg = AutonomyConfig {
+            level: AutonomyLevel::Full,
+            ..AutonomyConfig::default()
+        };
+        reload_from(&cfg);
+        assert_eq!(
+            current().expect("policy still installed").action_dir,
+            new_action,
+            "reload after set_action_dir must keep the swapped root"
         );
     }
 }

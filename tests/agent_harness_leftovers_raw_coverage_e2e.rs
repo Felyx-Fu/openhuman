@@ -124,6 +124,7 @@ impl Memory for StubMemory {
             timestamp: "2026-05-29T00:00:00Z".to_string(),
             session_id: session_id.map(str::to_string),
             score: Some(0.9),
+            taint: Default::default(),
         });
         Ok(())
     }
@@ -389,6 +390,7 @@ fn parent_context(workspace: PathBuf, provider: Arc<ScriptedProvider>) -> Parent
         session_key: "1700000000_parent".to_string(),
         session_parent_prefix: Some("root-chain".to_string()),
         on_progress: None,
+        run_queue: None,
     }
 }
 

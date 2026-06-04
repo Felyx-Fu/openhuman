@@ -20,6 +20,14 @@ vi.mock('../services/api/aiSettingsApi', async () => {
   return { ...actual, loadAISettings: () => mockLoadAISettings() };
 });
 
+// useUsageState gates polling on auth (#3297). Default authenticated so every
+// existing budget-gating assertion keeps exercising the fetch path; the gating
+// test below flips it false.
+const { mockAuthState } = vi.hoisted(() => ({ mockAuthState: { isAuthenticated: true } }));
+vi.mock('../providers/CoreStateProvider', () => ({
+  useCoreState: () => ({ snapshot: { auth: { isAuthenticated: mockAuthState.isAuthenticated } } }),
+}));
+
 // All chat workloads routed to OpenHuman — the default for every existing
 // test case (matches the legacy "you have a hosted-backend budget" world).
 const ALL_OPENHUMAN_AI_SETTINGS = {
@@ -123,6 +131,8 @@ describe('useUsageState', () => {
     mockGetCurrentPlan.mockReset();
     mockGetTeamUsage.mockReset();
     mockLoadAISettings.mockReset();
+    // Default authenticated; the auth-gating test opts out explicitly.
+    mockAuthState.isAuthenticated = true;
     // Default: keep the OpenHuman-routed world so every legacy assertion
     // about budget gating stays identical until a test opts into the
     // routed-away scenarios below.
@@ -542,6 +552,46 @@ describe('useUsageState', () => {
     expect(mockGetTeamUsage).not.toHaveBeenCalled();
   });
 
+  it('suppresses near-limit banner when chat is fully routed away but background workloads remain (#3097)', async () => {
+    // Background workloads (memory, heartbeat, …) keep the billing API call
+    // alive (ALL_WORKLOADS check), but isFullyRoutedAway (CHAT_WORKLOADS) is
+    // true so the near-limit banner must NOT show — the user's chat is not
+    // on OpenHuman's budget.
+    const { useUsageState } = await import('./useUsageState');
+
+    mockGetCurrentPlan.mockResolvedValue(freePlan());
+    // Usage at 90% — would trigger isNearLimit for OpenHuman-routed users.
+    mockGetTeamUsage.mockResolvedValue(buildUsage({ remainingUsd: 1, cycleBudgetUsd: 10 }));
+    mockLoadAISettings.mockResolvedValue({
+      cloudProviders: [],
+      routing: {
+        chat: { kind: 'local' as const, model: 'qwen3:8b' },
+        reasoning: { kind: 'local' as const, model: 'qwen3:8b' },
+        agentic: { kind: 'local' as const, model: 'qwen3:8b' },
+        coding: { kind: 'local' as const, model: 'qwen3:8b' },
+        // background workloads still on OpenHuman → billing API is still called
+        memory: { kind: 'openhuman' as const },
+        embeddings: { kind: 'openhuman' as const },
+        heartbeat: { kind: 'openhuman' as const },
+        learning: { kind: 'openhuman' as const },
+        subconscious: { kind: 'openhuman' as const },
+      },
+    });
+
+    const { result } = renderHook(() => useUsageState());
+
+    await waitFor(() => {
+      expect(result.current.isLoading).toBe(false);
+    });
+
+    expect(result.current.isFullyRoutedAway).toBe(true);
+    // usagePct ~90% but user is routed away from OpenHuman — no near-limit warning.
+    expect(result.current.isNearLimit).toBe(false);
+    expect(result.current.isAtLimit).toBe(false);
+    // billing was still fetched because background workloads remain on OpenHuman
+    expect(mockGetTeamUsage).toHaveBeenCalledTimes(1);
+  });
+
   it('still fetches billing when a background workload remains on OpenHuman', async () => {
     const { useUsageState } = await import('./useUsageState');
 
@@ -617,5 +667,31 @@ describe('useUsageState', () => {
     } finally {
       window.removeEventListener('unhandledrejection', unhandled);
     }
+  });
+
+  // -- #3297 — auth gating before dispatch (TAURI-RUST-8WY / 8WZ) -----------
+
+  it('does not dispatch usage/plan RPCs while unauthenticated (#3297, TAURI-RUST-8WY/8WZ)', async () => {
+    // Signed out (pre-login, or after a SessionExpired clear): these RPCs
+    // require a backend session, so dispatching them is a guaranteed 401 at
+    // the backend — the flood this fix removes. The hook must skip the fetch
+    // entirely rather than round-trip to a doomed call.
+    mockAuthState.isAuthenticated = false;
+    const { useUsageState } = await import('./useUsageState');
+    mockGetCurrentPlan.mockRejectedValue(new Error('plan must not be fetched while signed out'));
+    mockGetTeamUsage.mockRejectedValue(new Error('usage must not be fetched while signed out'));
+    mockLoadAISettings.mockRejectedValue(new Error('settings must not load while signed out'));
+
+    const { result } = renderHook(() => useUsageState());
+    // Let any (incorrectly-scheduled) async fetch microtasks flush.
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(mockLoadAISettings).not.toHaveBeenCalled();
+    expect(mockGetTeamUsage).not.toHaveBeenCalled();
+    expect(mockGetCurrentPlan).not.toHaveBeenCalled();
+    expect(result.current.teamUsage).toBeNull();
+    expect(result.current.currentPlan).toBeNull();
+    expect(result.current.isLoading).toBe(false);
   });
 });

@@ -198,6 +198,16 @@ pub(super) const CAPABILITIES: &[Capability] = &[
         privacy: None,
     },
     Capability {
+        id: "conversation.background_monitors",
+        name: "Background Monitors",
+        domain: "conversation",
+        category: CapabilityCategory::Conversation,
+        description: "Start, inspect, and stop bounded background command monitors that stream new events into active agent work.",
+        how_to: "Conversations > ask the assistant to monitor a command or status source",
+        status: CapabilityStatus::Beta,
+        privacy: LOCAL_RAW,
+    },
+    Capability {
         id: "conversation.subagent_mascots",
         name: "Subagent Mascots",
         domain: "conversation",
@@ -327,6 +337,16 @@ pub(super) const CAPABILITIES: &[Capability] = &[
         privacy: LOCAL_RAW,
     },
     Capability {
+        id: "intelligence.memory_pipeline_doctor",
+        name: "Memory Pipeline Doctor",
+        domain: "intelligence",
+        category: CapabilityCategory::Intelligence,
+        description: "Diagnose why the memory tree / wiki is empty or stalled. Walks each pipeline stage (embeddings config, scheduler gate, job queue, extraction/recall degradation, summary-tree precondition) and reports the single first blocking cause with an actionable fix, plus counters and extraction coverage. The agent can run it on itself; a typed 'first blocking cause' is surfaced in the Memory status panel, and jobs that failed under a now-fixed config can be requeued on demand via the `memory_tree_retry_failed` RPC.",
+        how_to: "Memory status panel shows the cause + fix; or ask the agent to diagnose memory; or `openhuman-core` RPC `memory_tree_doctor`",
+        status: CapabilityStatus::Beta,
+        privacy: LOCAL_RAW,
+    },
+    Capability {
         id: "intelligence.github_repo_memory_source",
         name: "GitHub Repo Memory Source",
         domain: "memory_sources",
@@ -344,6 +364,25 @@ pub(super) const CAPABILITIES: &[Capability] = &[
             Programmatic: openhuman.memory_sources_add (RPC).",
         status: CapabilityStatus::Beta,
         privacy: GITHUB_REPO_SOURCE,
+    },
+    Capability {
+        id: "intelligence.memory_source_sync_controls",
+        name: "Memory Source Sync Defaults & Controls",
+        domain: "memory_sources",
+        category: CapabilityCategory::Intelligence,
+        description: "Connected memory sources are enabled by default with conservative, \
+            per-kind sync caps so the first sync stays cheap (e.g. Gmail ~100 recent emails, \
+            GitHub repo 10 PRs / 10 issues / 50 commits, RSS 20 items). Each source row exposes \
+            an inline settings panel to adjust the limit fields that apply to its kind \
+            (max_items, sync_depth_days, max_prs/issues/commits, since_days). \
+            An \"All In\" action enables every source and removes the caps to build the richest \
+            memory graph, then triggers a full sync. Already-connected sources are migrated to \
+            the new defaults once.",
+        how_to: "Intelligence > Memory Sources — toggle a source, open its gear for per-source \
+            limits, or use \"All In\". Programmatic: openhuman.memory_sources_update and \
+            openhuman.memory_sources_apply_all_in (RPC).",
+        status: CapabilityStatus::Beta,
+        privacy: LOCAL_RAW,
     },
     Capability {
         id: "intelligence.embedding_provider_config",
@@ -426,6 +465,16 @@ pub(super) const CAPABILITIES: &[Capability] = &[
         category: CapabilityCategory::Intelligence,
         description: "When a delegated sub-task is long or complex, the orchestrator can route it into a fresh worker-labeled conversation thread instead of flooding the parent thread. The user opens the worker thread from the thread list (or via the reference card in the parent) to read the sub-agent's full transcript.",
         how_to: "Conversations > tap the worker reference card in the parent thread, or open the worker-labeled thread from the thread list",
+        status: CapabilityStatus::Beta,
+        privacy: DERIVED_TO_BACKEND,
+    },
+    Capability {
+        id: "intelligence.agent_library",
+        name: "Agents Library",
+        domain: "intelligence",
+        category: CapabilityCategory::Intelligence,
+        description: "Browse safe display metadata for registered agent definitions, compare worker capabilities, and start a one-off task with an explicitly selected agent.",
+        how_to: "Intelligence > Agent Tasks > Agents Library",
         status: CapabilityStatus::Beta,
         privacy: DERIVED_TO_BACKEND,
     },
@@ -702,8 +751,8 @@ pub(super) const CAPABILITIES: &[Capability] = &[
         name: "Configure Local Provider",
         domain: "local_ai",
         category: CapabilityCategory::LocalAI,
-        description: "Select Ollama or LM Studio as the local model provider and configure the local server endpoint.",
-        how_to: "Settings > AI > providers, or Settings > Local AI Model > Ollama server URL",
+        description: "Select Ollama, LM Studio, MLX, or a generic local OpenAI-compatible server as the local model provider and configure the endpoint.",
+        how_to: "Settings > AI > providers, or use provider strings: ollama:<model>, lmstudio:<model>, mlx:<model>, local-openai:<model>",
         status: CapabilityStatus::Beta,
         privacy: None,
     },
@@ -1629,6 +1678,21 @@ pub(super) const CAPABILITIES: &[Capability] = &[
                       of memory databases, session transcripts, tokens, and other internal state.",
         how_to: "Settings → Agent OS access",
         status: CapabilityStatus::Stable,
+        privacy: None,
+    },
+    Capability {
+        id: "security.sandbox_backends",
+        name: "Sandbox Execution Backends",
+        domain: "security",
+        category: CapabilityCategory::Settings,
+        description: "Route agent tool execution (shell, filesystem, process) through sandbox \
+                      backends — Docker containers or OS-level jails (Landlock/Seatbelt) — for \
+                      reduced blast radius on remote, channel, cron, or background sessions. \
+                      Configurable per agent/session/channel with safe defaults for non-main sessions.",
+        how_to: "Set sandbox_mode = \"sandboxed\" in agent.toml, or configure runtime.kind = \
+                 \"docker\" in the TOML config. Use openhuman.sandbox_status / \
+                 openhuman.sandbox_resolve_policy RPC to inspect.",
+        status: CapabilityStatus::Beta,
         privacy: None,
     },
     Capability {

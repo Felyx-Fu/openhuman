@@ -26,6 +26,7 @@ pub mod error;
 pub mod harness;
 pub mod hooks;
 pub mod host_runtime;
+pub mod library;
 pub mod memory_loader;
 pub mod multimodal;
 pub mod personality_paths;
@@ -46,6 +47,12 @@ pub mod tool_policy;
 pub mod tools;
 pub mod tree_loader;
 pub mod triage;
+/// Turn-origin task-local — explicit trust/routing label scoped by every
+/// entry point that invokes the agent (web chat, channel runtime,
+/// subconscious, cron, CLI). Read by the approval gate to make
+/// origin-aware decisions rather than inferring trust from the absence of
+/// `APPROVAL_CHAT_CONTEXT`.
+pub mod turn_origin;
 pub use schemas::{
     all_controller_schemas as all_agent_controller_schemas,
     all_registered_controllers as all_agent_registered_controllers,
