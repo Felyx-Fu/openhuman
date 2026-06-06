@@ -18,6 +18,9 @@ omit_skills_catalog = true
 [model]
 hint = "agentic"
 
+[subagents]
+allowlist = ["agent_memory"]
+
 [tools]
 # Narrow allowlist. Prediction-market venues only — no shell, no
 # file_write, no broad HTTP, no integration delegation, no wallet
@@ -32,10 +35,10 @@ named = [
     # Prediction-market venues.
     "polymarket",
     "kalshi",
-    # Memory recall lets the agent ground execution in the user's
-    # previously-stated preferences (default venue, account labels)
-    # instead of re-asking every time.
-    "memory_recall",
+    # Memory retrieval — delegates to the memory agent for grounding
+    # execution in the user's previously-stated preferences (default
+    # venue, account labels) instead of re-asking every time.
+    "call_memory_agent",
     # Confirmation gate — surfaced to the user when a venue tool returns
     # the approval-required error. The runtime routes the prompt to the
     # user and blocks until they reply.

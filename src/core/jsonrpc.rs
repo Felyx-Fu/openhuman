@@ -1493,6 +1493,15 @@ async fn run_server_inner(
         // sets OPENHUMAN_WORKSPACE to a writable path, then restarts.
         match crate::openhuman::config::Config::load_or_init().await {
             Ok(cfg) => {
+                let keyring_dir =
+                    crate::openhuman::keyring::store::workspace_dir_for_file_backend();
+                log::info!(
+                    "[boot] paths: config={} workspace={} keyring_dir={} keyring_backend={}",
+                    cfg.config_path.display(),
+                    cfg.workspace_dir.display(),
+                    keyring_dir.display(),
+                    crate::openhuman::keyring::backend_name(),
+                );
                 match crate::openhuman::memory::global::init(cfg.workspace_dir.clone()) {
                     Ok(_) => log::info!(
                         "[boot] memory::global initialized (workspace={})",
@@ -1509,10 +1518,13 @@ async fn run_server_inner(
                     ),
                     Err(e) => log::warn!("[boot] whatsapp_data::global init failed: {e}"),
                 }
-                // Seed bundled default skills into <workspace>/skills/ so they
-                // ship with the system — discoverable (skills_list) and runnable
-                // — without a manual drop. Idempotent; never clobbers user edits.
-                crate::openhuman::skills::registry::seed_default_skills(&cfg.workspace_dir);
+                // Prune legacy bundled skills (dev-workflow / github-issue-crusher
+                // / pr-review-shepherd) that older builds seeded into
+                // <workspace>/skills/. OpenHuman no longer ships bundled defaults;
+                // this removes the stale dirs on upgrade. Idempotent.
+                crate::openhuman::workflows::registry::prune_legacy_default_workflows(
+                    &cfg.workspace_dir,
+                );
                 // Boot-time Sentry user binding — issue #3135. If the user is
                 // already signed in (typical desktop restart), the auth-profile
                 // store has their `user_id` *now*, before any background loop
@@ -1880,7 +1892,7 @@ fn register_domain_subscribers(
         crate::openhuman::memory_conversations::register_conversation_persistence_subscriber(
             workspace_dir.clone(),
         );
-        crate::openhuman::memory::sync::register_sync_stage_bridge();
+        crate::openhuman::memory::sync::register_sync_stage_bridge(&config);
         if let Err(error) = crate::openhuman::composio::init_composio_trigger_history(
             workspace_dir.clone(),
         ) {
@@ -1916,13 +1928,19 @@ fn register_domain_subscribers(
             }
             Ok(None) => {
                 log::info!(
-                    "[auth] no session token at startup — scheduler gate set to signed_out"
+                    "[auth] no session token at startup — scheduler gate set to signed_out \
+                     (config_path={}, keyring_backend={})",
+                    config.config_path.display(),
+                    crate::openhuman::keyring::backend_name(),
                 );
                 crate::openhuman::scheduler_gate::set_signed_out(true);
             }
             Err(err) => {
                 log::warn!(
-                    "[auth] failed to read session token at startup ({err}) — assuming signed_out"
+                    "[auth] failed to read session token at startup ({err}) — assuming signed_out \
+                     (config_path={}, keyring_backend={})",
+                    config.config_path.display(),
+                    crate::openhuman::keyring::backend_name(),
                 );
                 crate::openhuman::scheduler_gate::set_signed_out(true);
             }
@@ -1999,7 +2017,7 @@ pub async fn bootstrap_core_runtime(host_kind: crate::core::types::HostKind) {
     // `embedded_core` derived from host_kind so the rest of the function (which
     // already keys behavior off the boolean) stays unchanged.
     let embedded_core = host_kind.is_desktop_shell();
-    let cfg = match crate::openhuman::config::Config::load_or_init().await {
+    let mut cfg = match crate::openhuman::config::Config::load_or_init().await {
         Ok(cfg) => cfg,
         Err(e) => {
             log::error!("[runtime] Failed to load config for socket manager: {e}");
@@ -2056,6 +2074,17 @@ pub async fn bootstrap_core_runtime(host_kind: crate::core::types::HostKind) {
              spawn_subagent will be unavailable until restart"
         );
     }
+
+    // --- Agent sandbox + projects dirs ---
+    // Create the action sandbox + default projects home and register the
+    // projects dir as a ReadWrite trusted root BEFORE building the live policy
+    // below (so the trusted root is reflected in `from_config`). This is the
+    // always-run boot for web-chat-only desktop cores; without it a fresh
+    // install with no messaging integrations leaves `~/OpenHuman/projects`
+    // uncreated and every shell-tool `current_dir` fails with ERROR_DIRECTORY
+    // (os error 267) on Windows / ENOENT on Unix (#3353, RC-A). Idempotent — a
+    // later `start_channels` calls the same helper.
+    crate::openhuman::config::ensure_agent_dirs(&mut cfg).await;
 
     // --- Live SecurityPolicy ---
     // Install the process-global live policy on the always-run serve boot, not

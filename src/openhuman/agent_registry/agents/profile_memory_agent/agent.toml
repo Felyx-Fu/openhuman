@@ -16,9 +16,12 @@ omit_memory_md = false
 [model]
 hint = "agentic"
 
+[subagents]
+allowlist = ["agent_memory"]
+
 [tools]
 named = [
-    "memory_recall",
+    "call_memory_agent",
     "memory_store",
     "memory_forget",
     "memory_doctor",
@@ -26,8 +29,6 @@ named = [
     "memory_tools_put",
     "remember_preference",
     "save_preference",
-    "query_memory",
-    "memory_tree",
     "workspace_read_persona",
     "workspace_update_persona",
     "workspace_reset_persona",

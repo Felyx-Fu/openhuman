@@ -15,6 +15,9 @@ omit_skills_catalog = true
 [model]
 hint = "agentic"
 
+[subagents]
+allowlist = ["agent_memory"]
+
 [tools]
 named = [
     "http_request",
@@ -30,7 +33,7 @@ named = [
     "grep",
     "glob",
     "list",
-    "memory_recall",
+    "call_memory_agent",
     # Parallel — full surface (search/extract are also delegated by web_search_tool;
     # chat/research/enrich/dataset unlock grounded answers and deep multi-step research).
     "parallel_search",

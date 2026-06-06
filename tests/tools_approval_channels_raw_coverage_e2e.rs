@@ -778,7 +778,7 @@ async fn composio_agent_tools_cover_backend_discovery_markdown_and_execution_pat
     );
     assert!(tools
         .iter()
-        .all(|tool| tool.category() == ToolCategory::Skill));
+        .all(|tool| tool.category() == ToolCategory::Workflow));
 
     let list_toolkits = tools
         .iter()
@@ -2073,7 +2073,15 @@ async fn web_channel_public_paths_cover_event_delivery_and_validation_errors() {
 
     assert_eq!(
         openhuman_core::openhuman::channels::web::start_chat(
-            "", "thread-1", "hello", None, None, None, None, None,
+            "",
+            "thread-1",
+            "hello",
+            None,
+            None,
+            None,
+            None,
+            None,
+            openhuman_core::openhuman::channels::web::ChatRequestMetadata::default(),
         )
         .await
         .expect_err("blank client_id"),
@@ -2081,7 +2089,15 @@ async fn web_channel_public_paths_cover_event_delivery_and_validation_errors() {
     );
     assert_eq!(
         openhuman_core::openhuman::channels::web::start_chat(
-            "client-1", "", "hello", None, None, None, None, None,
+            "client-1",
+            "",
+            "hello",
+            None,
+            None,
+            None,
+            None,
+            None,
+            openhuman_core::openhuman::channels::web::ChatRequestMetadata::default(),
         )
         .await
         .expect_err("blank thread_id"),
@@ -2089,7 +2105,15 @@ async fn web_channel_public_paths_cover_event_delivery_and_validation_errors() {
     );
     assert_eq!(
         openhuman_core::openhuman::channels::web::start_chat(
-            "client-1", "thread-1", "   ", None, None, None, None, None,
+            "client-1",
+            "thread-1",
+            "   ",
+            None,
+            None,
+            None,
+            None,
+            None,
+            openhuman_core::openhuman::channels::web::ChatRequestMetadata::default(),
         )
         .await
         .expect_err("blank message"),
@@ -2868,7 +2892,7 @@ async fn generated_tools_raw_paths_cover_admission_validation_and_execution() {
         " echo-generated ",
     );
     definition.permission_level = PermissionLevel::Write;
-    definition.category = ToolCategory::Skill;
+    definition.category = ToolCategory::Workflow;
     definition.scope = ToolScope::All;
     definition.provider_id = Some(" Trusted.Runtime ".into());
     definition.capability_id = Some(" messages.send ".into());
@@ -2911,7 +2935,7 @@ async fn generated_tools_raw_paths_cover_admission_validation_and_execution() {
         "Execute through the generated adapter."
     );
     assert_eq!(tools[0].permission_level(), PermissionLevel::Write);
-    assert_eq!(tools[0].category(), ToolCategory::Skill);
+    assert_eq!(tools[0].category(), ToolCategory::Workflow);
     assert_eq!(tools[0].scope(), ToolScope::All);
     assert_eq!(tools[0].parameters_schema(), schema);
     assert!(tools[0].external_effect());

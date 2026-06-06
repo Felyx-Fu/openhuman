@@ -22,7 +22,7 @@
 //! and serialised straight from disk.
 
 use serde::ser::SerializeMap;
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 use std::path::PathBuf;
 
 /// Iteration-cap policy for a sub-agent.
@@ -199,7 +199,7 @@ pub struct AgentDefinition {
     ///
     /// [`ArchetypeDelegationTool`]: crate::openhuman::agent_orchestration::tools::ArchetypeDelegationTool
     /// [`SkillDelegationTool`]: crate::openhuman::agent_orchestration::tools::SkillDelegationTool
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_subagent_entries")]
     pub subagents: Vec<SubagentEntry>,
 
     /// Optional override for the tool name this agent is exposed as when
@@ -225,8 +225,10 @@ pub struct AgentDefinition {
     ///   hands off to `Reasoning` or `Worker`, never to itself.
     /// * `Reasoning` MUST NOT list another `Reasoning` agent in
     ///   `subagents`. Reasoning composes downward into `Worker`s.
-    /// * `Worker` MUST NOT list any subagents. Workers execute; they
-    ///   do not orchestrate.
+    /// * `Worker` MUST NOT list open-ended subagents. Workers execute;
+    ///   they do not orchestrate. The hidden `call_memory_agent` tool may
+    ///   still use `agent_memory` in this policy so memory retrieval is
+    ///   gated without adding visible delegation tools.
     /// * `{ skills = "*" }` entries expand to the generic
     ///   `integrations_agent` (a `Worker`) so they are always allowed.
     ///
@@ -259,9 +261,10 @@ pub struct AgentDefinition {
 /// ```
 ///
 /// `Chat` and `Reasoning` are forbidden from spawning their own tier;
-/// `Worker` is forbidden from spawning anything. Total depth is capped
-/// at three hops by the harness regardless of tier (defence in depth
-/// against custom TOMLs that drop the tier annotation).
+/// `Worker` is forbidden from spawning anything except the hidden
+/// `agent_memory` retrieval specialist. Total depth is capped at three
+/// hops by the harness regardless of tier (defence in depth against
+/// custom TOMLs that drop the tier annotation).
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum AgentTier {
@@ -305,7 +308,8 @@ impl AgentTier {
 /// # TOML shapes
 ///
 /// ```toml
-/// subagents = [
+/// [subagents]
+/// allowlist = [
 ///     "researcher",            # AgentId("researcher")
 ///     "code_executor",         # AgentId("code_executor")
 ///     { skills = "*" },        # Skills { pattern: "*" }
@@ -333,6 +337,24 @@ pub enum SubagentEntry {
 pub struct SkillsWildcard {
     /// Glob / wildcard pattern. Only `"*"` is currently supported.
     pub skills: String,
+}
+
+fn deserialize_subagent_entries<'de, D>(deserializer: D) -> Result<Vec<SubagentEntry>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum Wire {
+        Section { allowlist: Vec<SubagentEntry> },
+        LegacyList(Vec<SubagentEntry>),
+    }
+
+    match Option::<Wire>::deserialize(deserializer)? {
+        Some(Wire::Section { allowlist }) => Ok(allowlist),
+        Some(Wire::LegacyList(entries)) => Ok(entries),
+        None => Ok(Vec::new()),
+    }
 }
 
 impl SkillsWildcard {

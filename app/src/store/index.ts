@@ -31,11 +31,11 @@ import mascotReducer from './mascotSlice';
 import notificationReducer from './notificationSlice';
 import personaReducer from './personaSlice';
 import providerSurfacesReducer from './providerSurfaceSlice';
+import { pttReducer } from './pttSlice';
 import socketReducer from './socketSlice';
 import themeReducer from './themeSlice';
 import threadReducer from './threadSlice';
 import { userScopedStorage } from './userScopedStorage';
-import workflowsReducer from './workflowsSlice';
 
 // Persisted slices write through `userScopedStorage` so each user's blob
 // lives at `${userId}:persist:<key>` instead of a single per-device blob
@@ -95,7 +95,7 @@ const persistedLocaleReducer = persistReducer(localePersistConfig, localeReducer
 const themePersistConfig = {
   key: 'theme',
   storage: localStorageAdapter,
-  whitelist: ['mode', 'tabBarLabels'],
+  whitelist: ['mode', 'tabBarLabels', 'fontSize'],
 };
 const persistedThemeReducer = persistReducer(themePersistConfig, themeReducer);
 
@@ -138,7 +138,11 @@ const persistedNotificationReducer = persistReducer(notificationPersistConfig, n
 // they were instead of falling through to "create a new thread". The
 // thread list and per-thread message caches are re-fetched from the core
 // on boot, so we deliberately don't persist them.
-const threadPersistConfig = { key: 'thread', storage, whitelist: ['selectedThreadId'] };
+const threadPersistConfig = {
+  key: 'thread',
+  storage,
+  whitelist: ['selectedThreadId', 'threadSidebarVisible'],
+};
 const persistedThreadReducer = persistReducer(threadPersistConfig, threadReducer);
 
 // Persist only previously persisted mascot appearance fields plus the custom
@@ -156,6 +160,17 @@ const persistedMascotReducer = persistReducer(mascotPersistConfig, mascotReducer
 // is round-tripped over RPC, so it is intentionally not in this slice.
 const personaPersistConfig = { key: 'persona', storage, whitelist: ['displayName', 'description'] };
 const persistedPersonaReducer = persistReducer(personaPersistConfig, personaReducer);
+
+// PTT (Push-to-Talk): persist the hotkey binding and session preferences.
+// `isHeld` is a runtime-only flag — deliberately excluded from the whitelist so
+// a crash or force-quit can never leave the app stuck in the "held" state.
+// The boot hook (T11) also explicitly resets it to false on mount.
+const pttPersistConfig = {
+  key: 'ptt',
+  storage,
+  whitelist: ['shortcut', 'speakReplies', 'showOverlay'],
+};
+const persistedPttReducer = persistReducer(pttPersistConfig, pttReducer);
 
 // chatRuntime is mostly ephemeral (streaming buffers, tool timelines,
 // inference status) — those MUST NOT survive a restart or the UI tries
@@ -201,7 +216,7 @@ export const store = configureStore({
     mascot: persistedMascotReducer,
     persona: persistedPersonaReducer,
     theme: persistedThemeReducer,
-    workflows: workflowsReducer,
+    ptt: persistedPttReducer,
   },
   middleware: getDefaultMiddleware => {
     const middleware = getDefaultMiddleware({

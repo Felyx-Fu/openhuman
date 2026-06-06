@@ -13,17 +13,19 @@ use anyhow::{Context, Result};
 
 use crate::openhuman::config::Config;
 use crate::openhuman::memory::tree_source::get_or_create_source_tree;
+use crate::openhuman::memory_queue::ensure_reembed_backfill;
 use crate::openhuman::memory_queue::store;
 use crate::openhuman::memory_queue::types::{
     AppendBufferPayload, AppendTarget, ExtractChunkPayload, FlushStalePayload, Job, JobKind,
-    JobOutcome, NewJob, NodeRef, ReembedBackfillPayload, SealPayload,
+    JobOutcome, NewJob, NodeRef, ReembedBackfillPayload, SealDocumentPayload, SealPayload,
 };
 use crate::openhuman::memory_store::chunks::store as chunk_store;
+use crate::openhuman::memory_store::chunks::types::Chunk;
 use crate::openhuman::memory_store::content::{
     self as content_store, read as content_read, tags as content_tags,
 };
 use crate::openhuman::memory_tree::score;
-use crate::openhuman::memory_tree::score::embed::{build_write_embedder, pack_checked};
+use crate::openhuman::memory_tree::score::embed::{build_write_embedder, pack_checked, Embedder};
 use crate::openhuman::memory_tree::score::store as score_store;
 use crate::openhuman::memory_tree::tree::store as summary_store;
 use crate::openhuman::memory_tree::tree::{LeafRef, TreeFactory};
@@ -31,6 +33,13 @@ use crate::openhuman::memory_tree::tree::{LeafRef, TreeFactory};
 /// Default age for L0 flush_stale when the caller doesn't override.
 /// 1 hour means low-volume sources get summaries within a working session.
 const L0_DEFAULT_FLUSH_AGE_SECS: i64 = 60 * 60;
+
+/// Maximum `extract_chunk` jobs to coalesce in one worker tick.
+///
+/// Scoring/extraction runs per chunk; embedding is deferred to a post-sync
+/// `ReembedBackfill` pass that maximizes the batch API (up to 1000 items).
+/// Coalescing still reduces per-job transaction overhead.
+pub(crate) const EXTRACT_EMBED_BATCH: usize = 32;
 
 /// Derive the tree scope from a source_id. For GitHub per-item ids like
 /// `github:owner/repo:commit:sha` or `github:owner/repo:issue:42`,
@@ -108,7 +117,7 @@ async fn handle_seal_document(config: &Config, job: &Job) -> Result<JobOutcome> 
     use crate::openhuman::memory::util::redact::redact;
     use crate::openhuman::memory_tree::tree::seal_document_subtree;
 
-    let payload: crate::openhuman::memory_queue::types::SealDocumentPayload =
+    let payload: SealDocumentPayload =
         serde_json::from_str(&job.payload_json).context("parse SealDocument payload")?;
 
     // doc_id (notion:{conn}:{page}) and tree_scope (notion:{conn}) are
@@ -168,6 +177,58 @@ async fn handle_seal_document(config: &Config, job: &Job) -> Result<JobOutcome> 
 }
 
 async fn handle_extract(config: &Config, job: &Job) -> Result<JobOutcome> {
+    let mut results = handle_extract_batch(config, &[job.clone()]).await?;
+    results
+        .pop()
+        .expect("single extract batch returns one result")
+        .1
+}
+
+/// Handle a claimed run of `extract_chunk` jobs.
+///
+/// Scoring runs per-chunk; embedding is **deferred** to a post-sync
+/// `ReembedBackfill` pass that maximizes the batch API (up to 1000 items
+/// per request, ~1M tokens). After all chunks are finalized, a backfill
+/// is triggered so the embedding pass starts promptly.
+pub async fn handle_extract_batch(
+    config: &Config,
+    jobs: &[Job],
+) -> Result<Vec<(Job, Result<JobOutcome>)>> {
+    let mut prepared = Vec::with_capacity(jobs.len());
+    let mut outcomes = Vec::new();
+
+    for job in jobs {
+        match prepare_extract(config, job).await {
+            Ok(Some(item)) => prepared.push(item),
+            Ok(None) => outcomes.push((job.clone(), Ok(JobOutcome::Done))),
+            Err(e) => outcomes.push((job.clone(), Err(e))),
+        }
+    }
+
+    let mut any_admitted = false;
+    for item in prepared {
+        let job = item.job.clone();
+        if item.result.kept {
+            any_admitted = true;
+        }
+        let result = finalize_extract(config, item);
+        outcomes.push((job, result));
+    }
+
+    if any_admitted {
+        ensure_reembed_backfill(config);
+    }
+
+    Ok(outcomes)
+}
+
+struct PreparedExtract {
+    job: Job,
+    chunk: Chunk,
+    result: score::ScoreResult,
+}
+
+async fn prepare_extract(config: &Config, job: &Job) -> Result<Option<PreparedExtract>> {
     let payload: ExtractChunkPayload =
         serde_json::from_str(&job.payload_json).context("parse ExtractChunk payload")?;
     let Some(chunk) = chunk_store::get_chunk(config, &payload.chunk_id)? else {
@@ -175,19 +236,17 @@ async fn handle_extract(config: &Config, job: &Job) -> Result<JobOutcome> {
             "[memory::jobs] extract chunk missing chunk_id={}",
             payload.chunk_id
         );
-        return Ok(JobOutcome::Done);
+        return Ok(None);
     };
 
     // Read the full body from disk (the `content` column in SQLite holds a
-    // ≤500-char preview after the MD-on-disk migration). Both the scorer and
-    // the embedder need the complete text so extraction and semantic indexing
-    // operate over the full chunk body, not a truncated preview.
+    // ≤500-char preview after the MD-on-disk migration). The scorer needs
+    // the complete text so extraction operates over the full chunk body.
     let body = content_read::read_chunk_body(config, &chunk.id)
         .with_context(|| format!("read full body for extract chunk_id={}", chunk.id))?;
-    // Score a clone of the chunk with the full body swapped in.
     let chunk_with_body = {
         let mut c = chunk.clone();
-        c.content = body.clone();
+        c.content = body;
         c
     };
 
@@ -197,66 +256,20 @@ async fn handle_extract(config: &Config, job: &Job) -> Result<JobOutcome> {
         None,
         None,
         None,
-        Some(format!(
-            "chunk {}",
-            &payload.chunk_id[..payload.chunk_id.len().min(16)]
-        )),
+        Some(format!("chunk {}", &chunk.id[..chunk.id.len().min(16)])),
     );
 
     let scoring_cfg = score::ScoringConfig::from_config(config);
     let result = score::score_chunk(&chunk_with_body, &scoring_cfg).await?;
-    let chunk_embedding: Option<Vec<f32>> = if result.kept {
-        // #002 (FR-002): when no usable embeddings provider is configured the
-        // write path returns None instead of an InertEmbedder — we SKIP
-        // embedding (the chunk is persisted embedding-less and re-embeddable
-        // later) rather than writing a fake all-zero vector that would
-        // silently poison semantic recall. `build_write_embedder` has already
-        // marked the process-global semantic-recall degraded flag with a typed
-        // cause for the status / doctor surface.
-        match build_write_embedder(config).context("build embedder in extract handler")? {
-            None => {
-                log::warn!(
-                    "[memory::jobs] extract chunk_id={} — embeddings unavailable, \
-                     skipping embed (semantic recall degraded)",
-                    chunk.id
-                );
-                None
-            }
-            Some(embedder) => {
-                // Reuse the body already read — avoid a second disk read.
-                let vector = match embedder.embed(&body).await {
-                    Ok(v) => v,
-                    Err(e) => {
-                        // #002: classify the embed failure so the worker can
-                        // fail fast on unrecoverable causes (budget/auth/dim)
-                        // and surface a typed reason, instead of burning the
-                        // retry budget. The typed failure is the outer
-                        // (downcast) error; the original chain is context.
-                        let failure =
-                            crate::openhuman::memory_tree::health::classify_embed_error(&e);
-                        return Err(anyhow::Error::new(failure).context(format!(
-                            "embed chunk_id={} in extract handler: {e:#}",
-                            chunk.id
-                        )));
-                    }
-                };
-                // Preserve the pre-cutover dimension guard (the job fails fast
-                // on a misconfigured embedder) even though #1574 no longer
-                // persists the packed blob to the legacy
-                // `mem_tree_chunks.embedding` column — the vector now goes to
-                // the per-model sidecar instead.
-                pack_checked(&vector).with_context(|| {
-                    format!("validate embedding dims for chunk_id={}", chunk.id)
-                })?;
-                // A real embed succeeded — recall is healthy again.
-                crate::openhuman::memory_tree::health::clear_semantic_recall_degraded();
-                Some(vector)
-            }
-        }
-    } else {
-        None
-    };
+    Ok(Some(PreparedExtract {
+        job: job.clone(),
+        chunk,
+        result,
+    }))
+}
 
+fn finalize_extract(config: &Config, item: PreparedExtract) -> Result<JobOutcome> {
+    let PreparedExtract { chunk, result, .. } = item;
     // Build follow-up job payloads before opening the tx — construction is
     // cheap and doesn't require a database connection. The two jobs are
     // enqueued inside the SAME transaction that commits the lifecycle update,
@@ -289,13 +302,9 @@ async fn handle_extract(config: &Config, job: &Job) -> Result<JobOutcome> {
         None,
         None,
         None,
-        Some(format!(
-            "chunk {}",
-            &payload.chunk_id[..payload.chunk_id.len().min(16)]
-        )),
+        Some(format!("chunk {}", &chunk.id[..chunk.id.len().min(16)])),
     );
 
-    let active_sig = chunk_store::tree_active_signature(config);
     let did_enqueue_source = chunk_store::with_connection(config, |conn| {
         let tx = conn.unchecked_transaction()?;
         score::persist_score_tx(
@@ -312,20 +321,6 @@ async fn handle_extract(config: &Config, job: &Job) -> Result<JobOutcome> {
                       WHERE id = ?2",
                 rusqlite::params![chunk_store::CHUNK_STATUS_ADMITTED, chunk.id],
             )?;
-            // #1574 write-side cutover: persist the embedding to the
-            // per-model `mem_tree_chunk_embeddings` sidecar at the active
-            // signature, inside THIS tx so it commits atomically with the
-            // lifecycle / score / job-enqueue writes. The legacy
-            // `mem_tree_chunks.embedding` column is no longer written
-            // (left intact for the §7 one-shot migration to read).
-            if let Some(emb) = chunk_embedding.as_deref() {
-                chunk_store::set_chunk_embedding_for_signature_tx(
-                    &tx,
-                    &chunk.id,
-                    &active_sig,
-                    emb,
-                )?;
-            }
         } else {
             tx.execute(
                 "UPDATE mem_tree_chunks
@@ -389,7 +384,6 @@ async fn handle_extract(config: &Config, job: &Job) -> Result<JobOutcome> {
         }
     }
 
-    // Signal workers after the tx commits (no atomicity requirement on signaling).
     if did_enqueue_source {
         super::worker::wake_workers();
     }
@@ -656,11 +650,11 @@ async fn handle_flush_stale(config: &Config, job: &Job) -> Result<JobOutcome> {
     Ok(JobOutcome::Done)
 }
 
-/// Texts per `ReembedBackfill` run. Bounded so one run holds the global
-/// single-LLM-slot (the job is `is_llm_bound`) for a predictable spell —
-/// the laptop-RAM safety the local-LLM-load rule requires. The chain
-/// self-continues via `Defer` until no rows remain.
-const REEMBED_BACKFILL_BATCH: usize = 16;
+/// Texts per `ReembedBackfill` run. This is now the **primary** embedding
+/// path (extract no longer embeds inline). Sized to maximize the batch API
+/// (Voyage: 1000 items, ~1M tokens per request). The `embed_batch_via_provider`
+/// layer handles sub-batching into API-safe chunks internally.
+const REEMBED_BACKFILL_BATCH: usize = 1000;
 /// Delay before the deferred chain revisits this same job row.
 const REEMBED_BACKFILL_REVISIT_MS: i64 = 750;
 
@@ -701,6 +695,95 @@ fn try_mark_summary_reembed_skipped(
             "[memory::jobs] reembed_backfill: failed to persist summary tombstone summary_id={summary_id} sig={model_signature}: {e}"
         );
     }
+}
+
+/// Read each row's stored source text, embed the readable bodies in **one
+/// batched call**, and classify per position exactly as the legacy per-row
+/// loop did. Generic over the chunk vs summary read/tombstone functions so
+/// both Phase-2 passes share one implementation.
+///
+/// Failure semantics are preserved verbatim from #1574 §6:
+/// - body read failure → log + persistent tombstone (`"body read failed: {e}"`)
+/// - embed wrong dim → log + tombstone (`"embed wrong dim"`)
+/// - embed error → log + tombstone (`"embed failed: {e}"`)
+///
+/// The single difference vs the old code is the embed call shape: one
+/// `embed_batch` (which collapses N provider round-trips into one for batch-
+/// capable providers, falling back to per-text internally) instead of N
+/// sequential `embed` awaits. Ordering is irrelevant — results are zipped
+/// back to their ids by position and folded into order-independent state.
+async fn reembed_collect(
+    config: &Config,
+    embedder: &dyn Embedder,
+    active_sig: &str,
+    ids: &[String],
+    label: &str,
+    read_body: impl Fn(&Config, &str) -> Result<String>,
+    mark_skipped: impl Fn(&Config, &str, &str, &str),
+) -> Result<Vec<(String, Vec<f32>)>> {
+    // Phase A: read bodies; persistently tombstone read failures so an
+    // unreadable row is attempted at most once per signature.
+    let mut readable: Vec<(&String, String)> = Vec::with_capacity(ids.len());
+    for id in ids {
+        match read_body(config, id) {
+            Ok(body) => readable.push((id, body)),
+            Err(e) => {
+                log::warn!(
+                    "[memory::jobs] reembed_backfill: {label} {id} body read failed: {e}; skipping (sig={active_sig})"
+                );
+                mark_skipped(config, id, active_sig, &format!("body read failed: {e}"));
+            }
+        }
+    }
+    if readable.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    // Phase B: one batched embed call. Scope `texts` so its borrow on
+    // `readable` ends before we consume `readable` below.
+    let results = {
+        let texts: Vec<&str> = readable.iter().map(|(_, body)| body.as_str()).collect();
+        embedder.embed_batch(&texts).await
+    };
+    if results.len() != readable.len() {
+        // `embed_batch`'s contract is one result per input position. A
+        // violation means we can't attribute results to ids. Returning an
+        // empty Vec here would make the handler write nothing yet still
+        // `Defer`, re-selecting the same ids forever — a non-converging
+        // chain. Surface it as an error so the chain terminates instead.
+        anyhow::bail!(
+            "reembed_backfill: {label} embed_batch returned {} results for {} texts (sig={active_sig})",
+            results.len(),
+            readable.len()
+        );
+    }
+
+    // Phase C: classify per position exactly as the legacy loop did.
+    let mut out: Vec<(String, Vec<f32>)> = Vec::with_capacity(readable.len());
+    for ((id, _body), result) in readable.into_iter().zip(results) {
+        match result {
+            Ok(v) if pack_checked(&v).is_ok() => out.push((id.clone(), v)),
+            Ok(_) => {
+                log::warn!(
+                    "[memory::jobs] reembed_backfill: {label} {id} embed wrong dim, skipping (sig={active_sig})"
+                );
+                mark_skipped(config, id, active_sig, "embed wrong dim");
+            }
+            Err(e) => {
+                let failure = crate::openhuman::memory_tree::health::classify_embed_error(&e);
+                if !failure.is_unrecoverable() {
+                    return Err(anyhow::Error::new(failure).context(format!(
+                        "reembed_backfill: {label} {id} transient embed failed (sig={active_sig}): {e:#}"
+                    )));
+                }
+                log::warn!(
+                    "[memory::jobs] reembed_backfill: {label} {id} embed failed with unrecoverable error: {e}; skipping (sig={active_sig})"
+                );
+                mark_skipped(config, id, active_sig, &format!("embed failed: {e}"));
+            }
+        }
+    }
+    Ok(out)
 }
 
 async fn handle_reembed_backfill(config: &Config, job: &Job) -> Result<JobOutcome> {
@@ -820,78 +903,26 @@ async fn handle_reembed_backfill(config: &Config, job: &Job) -> Result<JobOutcom
                 return Ok(JobOutcome::Done);
             }
         };
-    let mut chunk_vecs: Vec<(String, Vec<f32>)> = Vec::new();
-    for id in &chunk_ids {
-        match content_read::read_chunk_body(config, id) {
-            Ok(body) => match embedder.embed(&body).await {
-                Ok(v) if pack_checked(&v).is_ok() => chunk_vecs.push((id.clone(), v)),
-                Ok(_) => {
-                    log::warn!(
-                        "[memory::jobs] reembed_backfill: chunk {id} embed wrong dim, skipping (sig={active_sig})"
-                    );
-                    try_mark_chunk_reembed_skipped(config, id, &active_sig, "embed wrong dim");
-                }
-                Err(e) => {
-                    log::warn!(
-                        "[memory::jobs] reembed_backfill: chunk {id} embed failed: {e}; skipping (sig={active_sig})"
-                    );
-                    try_mark_chunk_reembed_skipped(
-                        config,
-                        id,
-                        &active_sig,
-                        &format!("embed failed: {e}"),
-                    );
-                }
-            },
-            Err(e) => {
-                log::warn!(
-                    "[memory::jobs] reembed_backfill: chunk {id} body read failed: {e}; skipping (sig={active_sig})"
-                );
-                try_mark_chunk_reembed_skipped(
-                    config,
-                    id,
-                    &active_sig,
-                    &format!("body read failed: {e}"),
-                );
-            }
-        }
-    }
-    let mut summary_vecs: Vec<(String, Vec<f32>)> = Vec::new();
-    for id in &summary_ids {
-        match content_read::read_summary_body(config, id) {
-            Ok(body) => match embedder.embed(&body).await {
-                Ok(v) if pack_checked(&v).is_ok() => summary_vecs.push((id.clone(), v)),
-                Ok(_) => {
-                    log::warn!(
-                        "[memory::jobs] reembed_backfill: summary {id} embed wrong dim, skipping (sig={active_sig})"
-                    );
-                    try_mark_summary_reembed_skipped(config, id, &active_sig, "embed wrong dim");
-                }
-                Err(e) => {
-                    log::warn!(
-                        "[memory::jobs] reembed_backfill: summary {id} embed failed: {e}; skipping (sig={active_sig})"
-                    );
-                    try_mark_summary_reembed_skipped(
-                        config,
-                        id,
-                        &active_sig,
-                        &format!("embed failed: {e}"),
-                    );
-                }
-            },
-            Err(e) => {
-                log::warn!(
-                    "[memory::jobs] reembed_backfill: summary {id} body read failed: {e}; skipping (sig={active_sig})"
-                );
-                try_mark_summary_reembed_skipped(
-                    config,
-                    id,
-                    &active_sig,
-                    &format!("body read failed: {e}"),
-                );
-            }
-        }
-    }
+    let chunk_vecs = reembed_collect(
+        config,
+        embedder.as_ref(),
+        &active_sig,
+        &chunk_ids,
+        "chunk",
+        content_read::read_chunk_body,
+        try_mark_chunk_reembed_skipped,
+    )
+    .await?;
+    let summary_vecs = reembed_collect(
+        config,
+        embedder.as_ref(),
+        &active_sig,
+        &summary_ids,
+        "summary",
+        content_read::read_summary_body,
+        try_mark_summary_reembed_skipped,
+    )
+    .await?;
 
     // Phase 3 (one short tx): persist all collected vectors to the sidecar.
     chunk_store::with_connection(config, |conn| {

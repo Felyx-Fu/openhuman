@@ -25,6 +25,21 @@
 //! - [`DomainEvent::ChannelMessageReceived`]
 //! - [`DomainEvent::ChannelMessageProcessed`]
 
+/// Voice-domain events.
+#[non_exhaustive]
+#[derive(Clone, Debug)]
+pub enum VoiceEvent {
+    /// A PTT session committed a transcript to a thread. Carries only
+    /// length/timing — never the raw text, per the PII-safe logging rule.
+    PttTranscriptCommitted {
+        thread_id: String,
+        session_id: u64,
+        text_len: usize,
+        held_ms: u64,
+        finalized_by_watchdog: bool,
+    },
+}
+
 /// Top-level domain event. Non-exhaustive so new variants can be added
 /// without breaking existing match arms.
 #[non_exhaustive]
@@ -200,12 +215,24 @@ pub enum DomainEvent {
     ///
     /// Emitted by the `memory` domain so the frontend can surface progress
     /// across request → fetch → store → queue → ingest → complete.
+    ///
+    /// `source_id` is the originating memory-source id (from
+    /// `memory_sources`) when the event can be attributed to a specific
+    /// source row. The frontend prefers this over `connection_id` for
+    /// per-row indicator matching (see RC#2, issue #3295). Set to `None`
+    /// when the event originates from a non-memory-source sync path (e.g. a
+    /// channel-provider ingest) — `connection_id` remains unchanged for
+    /// those callers.
     MemorySyncStageChanged {
         trigger: String,
         stage: String,
         provider: Option<String>,
         connection_id: Option<String>,
         detail: Option<String>,
+        /// Originating memory-source id for frontend per-row indicator
+        /// matching. `None` when the event is not attributable to a
+        /// specific `MemorySourceEntry`.
+        source_id: Option<String>,
     },
     /// A memory ingestion job started running on the local extraction LLM.
     /// Ingestion is singleton — this fires once, then a matching
@@ -223,6 +250,25 @@ pub enum DomainEvent {
         success: bool,
         elapsed_ms: u64,
         queue_depth: usize,
+    },
+
+    // ── Memory Diff ─────────────────────────────────────────────────────
+    /// A snapshot of a memory source's chunk state was captured.
+    MemoryDiffSnapshotTaken {
+        snapshot_id: String,
+        source_id: String,
+        source_kind: String,
+        item_count: usize,
+        trigger: String,
+    },
+    /// A diff was computed between two snapshots.
+    MemoryDiffComputed {
+        source_id: String,
+        from_snapshot_id: Option<String>,
+        to_snapshot_id: String,
+        added: usize,
+        removed: usize,
+        modified: usize,
     },
 
     // ── Channels ────────────────────────────────────────────────────────
@@ -328,13 +374,13 @@ pub enum DomainEvent {
 
     // ── Skills ──────────────────────────────────────────────────────────
     /// A skill was loaded into the runtime.
-    SkillLoaded { skill_id: String, runtime: String },
+    WorkflowLoaded { skill_id: String, runtime: String },
     /// A skill was stopped.
-    SkillStopped { skill_id: String },
+    WorkflowStopped { skill_id: String },
     /// A skill failed to start.
-    SkillStartFailed { skill_id: String, error: String },
+    WorkflowStartFailed { skill_id: String, error: String },
     /// A skill tool was executed.
-    SkillExecuted {
+    WorkflowExecuted {
         skill_id: String,
         tool_name: String,
         arguments: serde_json::Value,
@@ -884,6 +930,10 @@ pub enum DomainEvent {
     /// never to Sentry or the UI verbatim.
     SessionExpired { source: String, reason: String },
 
+    // ── Voice ────────────────────────────────────────────────────────────
+    /// A voice domain event (PTT, transcription lifecycle, etc.).
+    Voice(VoiceEvent),
+
     // ── Task sources ─────────────────────────────────────────────────────
     /// A task source completed a fetch pass.
     TaskSourceFetched {
@@ -989,7 +1039,9 @@ impl DomainEvent {
             | Self::MemorySyncStageChanged { .. }
             | Self::MemoryIngestionStarted { .. }
             | Self::MemoryIngestionCompleted { .. }
-            | Self::DocumentCanonicalized { .. } => "memory",
+            | Self::DocumentCanonicalized { .. }
+            | Self::MemoryDiffSnapshotTaken { .. }
+            | Self::MemoryDiffComputed { .. } => "memory",
 
             Self::CacheRebuilt { .. } => "learning",
 
@@ -1006,10 +1058,10 @@ impl DomainEvent {
             | Self::CronDeliveryRequested { .. }
             | Self::ProactiveMessageRequested { .. } => "cron",
 
-            Self::SkillLoaded { .. }
-            | Self::SkillStopped { .. }
-            | Self::SkillStartFailed { .. }
-            | Self::SkillExecuted { .. } => "skill",
+            Self::WorkflowLoaded { .. }
+            | Self::WorkflowStopped { .. }
+            | Self::WorkflowStartFailed { .. }
+            | Self::WorkflowExecuted { .. } => "workflow",
 
             Self::ToolExecutionStarted { .. } | Self::ToolExecutionCompleted { .. } => "tool",
 
@@ -1067,6 +1119,8 @@ impl DomainEvent {
 
             Self::TaskPlanAwaitingApproval { .. } | Self::TaskRunReclaimed { .. } => "agent",
 
+            Self::Voice(_) => "voice",
+
             Self::ApprovalRequested { .. }
             | Self::ApprovalDecided { .. }
             | Self::ApprovalGateOverrideIgnored { .. }
@@ -1119,6 +1173,8 @@ impl DomainEvent {
             Self::MemoryIngestionStarted { .. } => "MemoryIngestionStarted",
             Self::MemoryIngestionCompleted { .. } => "MemoryIngestionCompleted",
             Self::DocumentCanonicalized { .. } => "DocumentCanonicalized",
+            Self::MemoryDiffSnapshotTaken { .. } => "MemoryDiffSnapshotTaken",
+            Self::MemoryDiffComputed { .. } => "MemoryDiffComputed",
             Self::CacheRebuilt { .. } => "CacheRebuilt",
             Self::ChannelInboundMessage { .. } => "ChannelInboundMessage",
             Self::ChannelMessageReceived { .. } => "ChannelMessageReceived",
@@ -1131,10 +1187,10 @@ impl DomainEvent {
             Self::CronJobCompleted { .. } => "CronJobCompleted",
             Self::CronDeliveryRequested { .. } => "CronDeliveryRequested",
             Self::ProactiveMessageRequested { .. } => "ProactiveMessageRequested",
-            Self::SkillLoaded { .. } => "SkillLoaded",
-            Self::SkillStopped { .. } => "SkillStopped",
-            Self::SkillStartFailed { .. } => "SkillStartFailed",
-            Self::SkillExecuted { .. } => "SkillExecuted",
+            Self::WorkflowLoaded { .. } => "WorkflowLoaded",
+            Self::WorkflowStopped { .. } => "WorkflowStopped",
+            Self::WorkflowStartFailed { .. } => "WorkflowStartFailed",
+            Self::WorkflowExecuted { .. } => "WorkflowExecuted",
             Self::ToolExecutionStarted { .. } => "ToolExecutionStarted",
             Self::ToolExecutionCompleted { .. } => "ToolExecutionCompleted",
             Self::WebhookIncomingRequest { .. } => "WebhookIncomingRequest",
@@ -1202,6 +1258,7 @@ impl DomainEvent {
             Self::BackendMeetHarness { .. } => "BackendMeetHarness",
             Self::BackendMeetTranscript { .. } => "BackendMeetTranscript",
             Self::BackendMeetError { .. } => "BackendMeetError",
+            Self::Voice(_) => "Voice",
         }
     }
 

@@ -130,9 +130,6 @@ fn build_registered_controllers() -> Vec<RegisteredController> {
     // Local procedural operating experience for agent self-learning
     controllers
         .extend(crate::openhuman::agent_experience::all_agent_experience_registered_controllers());
-    // Agent workflows — phase-keyed guidance bound to task lifecycle
-    controllers
-        .extend(crate::openhuman::agent_workflows::all_agent_workflows_registered_controllers());
     // System and process health monitoring
     controllers.extend(crate::openhuman::health::all_health_registered_controllers());
     // Diagnostic tools
@@ -172,6 +169,9 @@ fn build_registered_controllers() -> Vec<RegisteredController> {
     controllers.extend(crate::openhuman::service::all_service_registered_controllers());
     // Data migration utilities
     controllers.extend(crate::openhuman::migration::all_migration_registered_controllers());
+    // Saved council definitions for the desktop Model Council surface.
+    controllers
+        .extend(crate::openhuman::council_registry::all_council_registry_registered_controllers());
     // Model Council: multi-model deliberation (parallel members + chair synthesis)
     controllers.extend(crate::openhuman::model_council::all_model_council_registered_controllers());
     // Background command monitors for agent-scoped event sources
@@ -195,10 +195,10 @@ fn build_registered_controllers() -> Vec<RegisteredController> {
     // Managed Node.js runtime bridge (tool listing + dispatch)
     controllers.extend(crate::openhuman::javascript::all_javascript_registered_controllers());
     // Discovered SKILL.md skills and their bundled resources
-    controllers.extend(crate::openhuman::skills::all_skills_registered_controllers());
+    controllers.extend(crate::openhuman::workflows::all_workflows_registered_controllers());
     // User workspace and file management
     controllers.extend(crate::openhuman::workspace::all_workspace_registered_controllers());
-    // Skill tool registry
+    // Workflow tool registry
     controllers.extend(crate::openhuman::tools::all_tools_registered_controllers());
     // Unified read-only registry across MCP stdio tools and controller-backed tools
     controllers.extend(crate::openhuman::tool_registry::all_tool_registry_registered_controllers());
@@ -219,6 +219,8 @@ fn build_registered_controllers() -> Vec<RegisteredController> {
     // Memory sources — user-configured data connectors registry
     controllers
         .extend(crate::openhuman::memory_sources::all_memory_sources_registered_controllers());
+    // Memory diff — snapshot-based change tracking for memory sources
+    controllers.extend(crate::openhuman::memory_diff::all_memory_diff_registered_controllers());
     // Link shortener for long tracking URLs — saves LLM tokens
     controllers
         .extend(crate::openhuman::redirect_links::all_redirect_links_registered_controllers());
@@ -335,7 +337,6 @@ fn build_declared_controller_schemas() -> Vec<ControllerSchema> {
     schemas.extend(crate::openhuman::agent::all_agent_controller_schemas());
     schemas.extend(crate::openhuman::agent_registry::all_agent_registry_controller_schemas());
     schemas.extend(crate::openhuman::agent_experience::all_agent_experience_controller_schemas());
-    schemas.extend(crate::openhuman::agent_workflows::all_agent_workflows_controller_schemas());
     schemas.extend(crate::openhuman::health::all_health_controller_schemas());
     schemas.extend(crate::openhuman::doctor::all_doctor_controller_schemas());
     schemas.extend(crate::openhuman::encryption::all_encryption_controller_schemas());
@@ -355,6 +356,7 @@ fn build_declared_controller_schemas() -> Vec<ControllerSchema> {
     schemas.extend(crate::openhuman::credentials::all_credentials_controller_schemas());
     schemas.extend(crate::openhuman::service::all_service_controller_schemas());
     schemas.extend(crate::openhuman::migration::all_migration_controller_schemas());
+    schemas.extend(crate::openhuman::council_registry::all_council_registry_controller_schemas());
     schemas.extend(crate::openhuman::model_council::all_model_council_controller_schemas());
     schemas.extend(crate::openhuman::monitor::all_monitor_controller_schemas());
     schemas.extend(crate::openhuman::inference::all_inference_controller_schemas());
@@ -367,7 +369,7 @@ fn build_declared_controller_schemas() -> Vec<ControllerSchema> {
     schemas.extend(crate::openhuman::sandbox::all_sandbox_controller_schemas());
     schemas.extend(crate::openhuman::socket::all_socket_controller_schemas());
     schemas.extend(crate::openhuman::javascript::all_javascript_controller_schemas());
-    schemas.extend(crate::openhuman::skills::all_skills_controller_schemas());
+    schemas.extend(crate::openhuman::workflows::all_workflows_controller_schemas());
     schemas.extend(crate::openhuman::workspace::all_workspace_controller_schemas());
     schemas.extend(crate::openhuman::tools::all_tools_controller_schemas());
     schemas.extend(crate::openhuman::tool_registry::all_tool_registry_controller_schemas());
@@ -381,6 +383,7 @@ fn build_declared_controller_schemas() -> Vec<ControllerSchema> {
         crate::openhuman::memory_sync::sync_status::all_memory_sync_status_controller_schemas(),
     );
     schemas.extend(crate::openhuman::memory_sources::all_memory_sources_controller_schemas());
+    schemas.extend(crate::openhuman::memory_diff::all_memory_diff_controller_schemas());
     schemas.extend(crate::openhuman::redirect_links::all_redirect_links_controller_schemas());
     schemas.extend(crate::openhuman::referral::all_referral_controller_schemas());
     schemas.extend(crate::openhuman::billing::all_billing_controller_schemas());
@@ -493,7 +496,7 @@ pub fn namespace_description(namespace: &str) -> Option<&'static str> {
         "screen_intelligence" => Some("Screen capture, permissions, and accessibility automation."),
         "security" => Some("Security policy and autonomy guardrail metadata."),
         "service" => Some("Desktop service lifecycle management."),
-        "skills" => Some("Discovered SKILL.md skills and their bundled resources."),
+        "workflows" => Some("Discovered workflows (WORKFLOW.md/SKILL.md bundles) and their resources."),
         "socket" => Some("Backend Socket.IO bridge controls."),
         "memory" => Some("Document storage, vector search, key-value store, and knowledge graph."),
         "memory_tree" => Some(
@@ -505,10 +508,16 @@ pub fn namespace_description(namespace: &str) -> Option<&'static str> {
         "memory_sources" => Some(
             "User-configured data connectors (Composio, folders, GitHub repos, RSS, web pages) that feed memory.",
         ),
+        "memory_diff" => Some(
+            "Snapshot-based change tracking for memory sources — capture state, compute diffs, and surface changes to agents.",
+        ),
         "redirect_links" => Some(
             "Shorten long tracking URLs to `openhuman://link/<id>` placeholders (SQLite-backed) to save tokens in prompts, with round-trip rewrite helpers.",
         ),
         "referral" => Some("Referral codes, stats, and apply flows via the hosted backend API."),
+        "run_ledger" => Some(
+            "Durable agent and workflow run state, child lineage, events, telemetry, and checkpoint references.",
+        ),
         "billing" => Some("Subscription plan, payment links, and credit top-up via the backend."),
         "team" => Some("Team member management, invites, and role changes via the backend."),
         "tool_registry" => Some(

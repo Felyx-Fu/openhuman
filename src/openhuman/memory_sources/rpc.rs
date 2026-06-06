@@ -314,6 +314,47 @@ pub async fn status_list_rpc() -> Result<RpcOutcome<StatusListResponse>, String>
     Ok(RpcOutcome::new(StatusListResponse { statuses }, vec![]))
 }
 
+// ── Supported Toolkits ──
+
+#[derive(Debug, serde::Serialize)]
+pub struct SupportedToolkitsResponse {
+    /// Sorted, de-duplicated toolkit slugs that ship a native memory-sync
+    /// provider (e.g. `clickup`, `github`, `gmail`, `linear`, `notion`,
+    /// `slack`). Anything outside this set can never sync.
+    pub toolkits: Vec<String>,
+}
+
+/// Toolkit slugs the memory-sync layer can actually run, sourced from the
+/// provider registry (`all_providers()`) — the single source of truth shared
+/// with `scan_active_sync_targets`. Exposed so the Add Source picker can
+/// disable connections whose toolkit has no provider instead of letting the
+/// user add a dead source. See issue #3352.
+pub async fn supported_toolkits_rpc() -> Result<RpcOutcome<SupportedToolkitsResponse>, String> {
+    tracing::debug!("[memory_sources] supported_toolkits_rpc: entry");
+    // Ensure the built-in providers are registered before we snapshot the
+    // registry — in CLI / fresh-process contexts the startup hook that calls
+    // this may not have run yet.
+    crate::openhuman::memory_sync::composio::init_default_composio_sync_providers();
+
+    let mut toolkits: Vec<String> =
+        crate::openhuman::memory_sync::composio::all_composio_sync_providers()
+            .iter()
+            .map(|p| p.toolkit_slug().to_string())
+            .collect();
+    toolkits.sort();
+    toolkits.dedup();
+
+    tracing::debug!(
+        count = toolkits.len(),
+        toolkits = ?toolkits,
+        "[memory_sources] supported_toolkits_rpc: resolved supported toolkit set"
+    );
+    Ok(RpcOutcome::new(
+        SupportedToolkitsResponse { toolkits },
+        vec![],
+    ))
+}
+
 // ── Sync Audit Log ──
 
 #[derive(Debug, serde::Serialize)]
@@ -497,4 +538,45 @@ pub async fn apply_all_in_rpc() -> Result<RpcOutcome<AllInResponse>, String> {
         },
         vec![],
     ))
+}
+
+#[cfg(test)]
+mod supported_toolkits_tests {
+    use super::*;
+
+    /// The supported-toolkit set must include every built-in provider slug.
+    /// Asserted via `contains` (not exact equality) because the provider
+    /// registry is a process-global shared with other tests in this binary
+    /// that may register ad-hoc dummy providers.
+    #[tokio::test]
+    async fn supported_toolkits_includes_builtin_providers() {
+        let outcome = supported_toolkits_rpc()
+            .await
+            .expect("supported_toolkits_rpc should succeed");
+        let toolkits = outcome.value.toolkits;
+
+        for slug in ["clickup", "github", "gmail", "linear", "notion", "slack"] {
+            assert!(
+                toolkits.iter().any(|t| t == slug),
+                "expected supported toolkits to include '{slug}', got {toolkits:?}"
+            );
+        }
+    }
+
+    /// The returned set must be sorted and free of duplicates.
+    #[tokio::test]
+    async fn supported_toolkits_is_sorted_and_deduped() {
+        let outcome = supported_toolkits_rpc()
+            .await
+            .expect("supported_toolkits_rpc should succeed");
+        let toolkits = outcome.value.toolkits;
+
+        let mut sorted = toolkits.clone();
+        sorted.sort();
+        sorted.dedup();
+        assert_eq!(
+            toolkits, sorted,
+            "toolkits should be sorted and de-duplicated"
+        );
+    }
 }

@@ -18,6 +18,9 @@ omit_skills_catalog = true
 [model]
 hint = "agentic"
 
+[subagents]
+allowlist = ["agent_memory"]
+
 [tools]
 # Narrow allowlist. Wallet + web3 + market primitives only — no shell, no
 # file_write, no broad HTTP, no integration delegation. Wallet names line up
@@ -63,10 +66,11 @@ named = [
     "stock_quote",
     "stock_exchange_rate",
     "stock_crypto_series",
-    # Memory recall lets the agent ground execution in the user's
-    # previously-stated preferences (default chain, slippage tolerance,
-    # named addresses) instead of re-asking every time.
-    "memory_recall",
+    # Memory retrieval — delegates to the memory agent for grounding
+    # execution in the user's previously-stated preferences (default
+    # chain, slippage tolerance, named addresses) instead of re-asking
+    # every time.
+    "call_memory_agent",
     # Confirmation gate — the agent MUST call this before any
     # wallet_execute_prepared / write-side exchange order. The runtime
     # routes the prompt to the user and blocks until they reply.

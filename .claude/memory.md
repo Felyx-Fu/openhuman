@@ -301,6 +301,13 @@ Quick reference for anyone starting with Claude on this project. Updated by the 
 - **Upstream `main` has 5 Vitest failures and 4 TypeScript compile errors** — Caused by missing iOS experimental dependencies: `@noble/ciphers/chacha`, `@noble/ciphers/webcrypto`, `qrcode.react`, `@tauri-apps/plugin-barcode-scanner`. Breaks `pnpm compile`, `pnpm build`, `pnpm test:coverage` on a clean checkout. Always verify by stashing changes and running checks on the base branch before blaming your PR.
 - **`cargo fmt` must run after codecrusher** — codecrusher does not reliably produce `cargo fmt`-clean Rust. Always run `cargo fmt --manifest-path Cargo.toml` after codecrusher finishes and before committing.
 
+## TaskKanbanBoard (Issue #3347 — frontend-only subset)
+
+- **5 columns, 7 statuses** — `COLUMN_DEFS` in `TaskKanbanBoard.tsx` defines columns `todo / awaiting_approval / in_progress / blocked / done`. `columnFor()` maps the two virtual statuses: `ready → in_progress` (renders a "Ready to start" sage badge) and `rejected → done` (renders a "Rejected" coral badge). Anyone adding a new `TaskBoardCardStatus` must update both `COLUMN_DEFS` and `columnFor()`.
+- **Native HTML5 drag-and-drop only** — No DnD library (@dnd-kit, react-beautiful-dnd). Cards set `dataTransfer` key `application/x-task-card-id`; columns handle `onDragOver` / `onDragLeave` / `onDrop`. Arrow buttons are the touch/accessibility fallback. Do not add a DnD library.
+- **`mutatingCardId` is optional on `TaskKanbanBoard`** — `IntelligenceTasksTab` sets/clears it in `finally` blocks around personal-board mutations; `Conversations.tsx` (second consumer) does not pass it. Both consumers must keep new props optional to avoid compile failures.
+- **Bare `vitest run <path>` fails with "document is not defined"** — Must use `--config test/vitest.config.ts` (or `pnpm debug unit <relative-path>`) to load the jsdom environment. Piping `pnpm exec vitest run` through `| tail` also buffers all output until completion, hiding progress — use the debug runner instead.
+
 ## Memory Sync Sources — Defaults ON + Per-Source UI (Issue #3293)
 
 - **Conservative caps registry** — `composio_defaults_for_toolkit(toolkit) -> (max_items, sync_depth_days)` in `src/openhuman/memory_sources/registry.rs` is the single source of truth. Values: gmail 100/30, slack 50/14, notion 30/30, linear 50/30, clickup 50/30, github 50/30, generic 30/14. Non-Composio defaults (GithubRepo 10PR/10issue/50commit, RSS 20, Twitter 7d) live in `apply_kind_defaults` in `rpc.rs`.

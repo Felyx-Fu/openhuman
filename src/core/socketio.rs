@@ -438,6 +438,7 @@ pub fn attach_socketio() -> (socketioxide::layer::SocketIoLayer, SocketIo) {
                         payload.profile_id,
                         payload.locale,
                         payload.queue_mode,
+                        crate::openhuman::channels::providers::web::ChatRequestMetadata::default(),
                     )
                     .await
                     {
@@ -868,6 +869,7 @@ pub fn spawn_web_channel_bridge(io: SocketIo) {
                     provider,
                     connection_id,
                     detail,
+                    source_id,
                 } => {
                     let payload = serde_json::json!({
                         "trigger": trigger,
@@ -875,6 +877,10 @@ pub fn spawn_web_channel_bridge(io: SocketIo) {
                         "provider": provider,
                         "connection_id": connection_id,
                         "detail": detail,
+                        // source_id is the memory-source row id for frontend per-row
+                        // indicator matching (RC#2, issue #3295). connection_id is
+                        // preserved unchanged for downstream consumers.
+                        "source_id": source_id,
                     });
                     let _ = io_memory_sync.emit("memory:sync_stage", &payload);
                 }

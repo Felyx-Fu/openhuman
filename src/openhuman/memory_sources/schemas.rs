@@ -129,6 +129,7 @@ pub fn all_controller_schemas() -> Vec<ControllerSchema> {
         schemas("read_item"),
         schemas("sync"),
         schemas("status_list"),
+        schemas("supported_toolkits"),
         schemas("sync_audit_log"),
         schemas("estimate_sync_cost"),
         schemas("monthly_cost_summary"),
@@ -173,6 +174,10 @@ pub fn all_registered_controllers() -> Vec<RegisteredController> {
         RegisteredController {
             schema: schemas("status_list"),
             handler: handle_status_list,
+        },
+        RegisteredController {
+            schema: schemas("supported_toolkits"),
+            handler: handle_supported_toolkits,
         },
         RegisteredController {
             schema: schemas("sync_audit_log"),
@@ -231,6 +236,7 @@ pub fn schemas(function: &str) -> ControllerSchema {
                     ty: TypeSchema::Enum {
                         variants: vec![
                             "composio",
+                            "conversation",
                             "folder",
                             "github_repo",
                             "twitter_query",
@@ -399,6 +405,19 @@ pub fn schemas(function: &str) -> ControllerSchema {
                 name: "statuses",
                 ty: TypeSchema::Array(Box::new(TypeSchema::Ref("SourceStatus"))),
                 comment: "One row per configured memory source.",
+                required: true,
+            }],
+        },
+        "supported_toolkits" => ControllerSchema {
+            namespace: NAMESPACE,
+            function: "supported_toolkits",
+            description: "Toolkit slugs that ship a native memory-sync provider. \
+                          The Add Source picker disables connections outside this set.",
+            inputs: vec![],
+            outputs: vec![FieldSchema {
+                name: "toolkits",
+                ty: TypeSchema::Array(Box::new(TypeSchema::String)),
+                comment: "Sorted, de-duplicated supported toolkit slugs.",
                 required: true,
             }],
         },
@@ -592,6 +611,10 @@ fn handle_sync(params: Map<String, Value>) -> ControllerFuture {
 
 fn handle_status_list(_params: Map<String, Value>) -> ControllerFuture {
     Box::pin(async move { to_json(rpc::status_list_rpc().await?) })
+}
+
+fn handle_supported_toolkits(_params: Map<String, Value>) -> ControllerFuture {
+    Box::pin(async move { to_json(rpc::supported_toolkits_rpc().await?) })
 }
 
 fn handle_sync_audit_log(_params: Map<String, Value>) -> ControllerFuture {

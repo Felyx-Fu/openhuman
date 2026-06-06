@@ -7,6 +7,7 @@ import {
   openhumanTaskSourcesFetch,
   openhumanTaskSourcesList,
   openhumanTaskSourcesStatus,
+  openhumanTaskSourcesSync,
   openhumanTaskSourcesUpdate,
 } from '../../../utils/tauriCommands';
 import { TaskKanbanBoard } from './TaskKanbanBoard';
@@ -18,8 +19,17 @@ vi.mock('../../../utils/tauriCommands', () => ({
   openhumanTaskSourcesFetch: vi.fn(),
   openhumanTaskSourcesList: vi.fn(),
   openhumanTaskSourcesStatus: vi.fn(),
+  openhumanTaskSourcesSync: vi.fn(),
   openhumanTaskSourcesUpdate: vi.fn(),
 }));
+
+// TaskSourceControls navigates to the settings page via useNavigate(); these
+// tests render the board without a <Router>, so capture navigation via a spy.
+const navigateSpy = vi.hoisted(() => vi.fn());
+vi.mock('react-router-dom', async () => {
+  const actual = await vi.importActual<typeof import('react-router-dom')>('react-router-dom');
+  return { ...actual, useNavigate: () => navigateSpy };
+});
 
 function card(partial: Partial<TaskBoardCard>): TaskBoardCard {
   return {
@@ -65,7 +75,11 @@ describe('TaskKanbanBoard approval surface', () => {
       fetched: 3,
       routed: 2,
       skippedDupe: 1,
+      pruned: 0,
     });
+    vi.mocked(openhumanTaskSourcesSync).mockResolvedValue([
+      { sourceId: 'src-1', provider: 'github', fetched: 3, routed: 2, skippedDupe: 1, pruned: 1 },
+    ]);
     vi.mocked(openhumanTaskSourcesUpdate).mockResolvedValue({
       id: 'src-1',
       provider: 'github',
@@ -95,7 +109,7 @@ describe('TaskKanbanBoard approval surface', () => {
     expect(onDecidePlan).toHaveBeenCalledWith(expect.objectContaining({ id: 'a' }), false);
   });
 
-  it('buckets ready→todo and rejected→blocked columns so the cards still render', () => {
+  it('buckets ready→in_progress column and rejected→done column so the cards still render', () => {
     render(
       <TaskKanbanBoard
         board={board([
@@ -178,9 +192,47 @@ describe('TaskKanbanBoard approval surface', () => {
     fireEvent.click(screen.getByText('settings.taskSources.fetchNow'));
     await waitFor(() => expect(openhumanTaskSourcesFetch).toHaveBeenCalledWith('src-1'));
 
+    fireEvent.click(screen.getByText('settings.taskSources.syncAll'));
+    await waitFor(() => expect(openhumanTaskSourcesSync).toHaveBeenCalled());
+
     fireEvent.click(screen.getByText('settings.taskSources.disable'));
     await waitFor(() =>
       expect(openhumanTaskSourcesUpdate).toHaveBeenCalledWith('src-1', { enabled: false })
     );
+
+    // "Manage sources" jumps to the settings page.
+    fireEvent.click(screen.getByText('conversations.taskKanban.sources.manage'));
+    expect(navigateSpy).toHaveBeenCalledWith('/settings/task-sources');
+  });
+
+  it('shows a "View work" button on a card with a session thread and calls onViewSession', () => {
+    const onViewSession = vi.fn();
+    render(
+      <TaskKanbanBoard
+        board={board([
+          card({
+            id: 'c1',
+            title: 'Worked card',
+            status: 'in_progress',
+            sessionThreadId: 'task-xyz',
+          }),
+        ])}
+        onViewSession={onViewSession}
+      />
+    );
+
+    fireEvent.click(screen.getByTitle('conversations.taskKanban.viewWork'));
+    expect(onViewSession).toHaveBeenCalledWith(expect.objectContaining({ id: 'c1' }));
+  });
+
+  it('omits the "View work" button when the card has no session thread', () => {
+    render(
+      <TaskKanbanBoard
+        board={board([card({ id: 'c2', title: 'Unworked card', status: 'todo' })])}
+        onViewSession={vi.fn()}
+      />
+    );
+
+    expect(screen.queryByTitle('conversations.taskKanban.viewWork')).toBeNull();
   });
 });

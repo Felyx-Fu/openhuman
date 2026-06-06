@@ -12,6 +12,7 @@ const log = debug('memory-sources');
 
 export type SourceKind =
   | 'composio'
+  | 'conversation'
   | 'folder'
   | 'github_repo'
   | 'twitter_query'
@@ -166,6 +167,21 @@ export async function syncMemorySource(sourceId: string): Promise<void> {
   });
 }
 
+/**
+ * Toolkit slugs that ship a native memory-sync provider (backend registry —
+ * `all_providers()`). The Add Source connection picker uses this to disable
+ * connections whose toolkit can never sync. Maps to
+ * `openhuman.memory_sources_supported_toolkits`. See issue #3352.
+ */
+export async function getSupportedToolkits(): Promise<string[]> {
+  log('supported_toolkits');
+  const resp = await callCoreRpc<{ toolkits: string[] }>({
+    method: 'openhuman.memory_sources_supported_toolkits',
+  });
+  const data = unwrap<{ toolkits: string[] }>(resp);
+  return data.toolkits ?? [];
+}
+
 export interface ApplyAllInResult {
   sources: MemorySourceEntry[];
   sync_triggered: number;
@@ -191,6 +207,7 @@ export async function applyAllIn(): Promise<ApplyAllInResult> {
 /// without each call site duplicating the switch.
 export const SOURCE_KIND_LABEL_KEYS: Record<SourceKind, string> = {
   composio: 'memorySources.kind.composio',
+  conversation: 'memorySources.kind.conversation',
   folder: 'memorySources.kind.folder',
   github_repo: 'memorySources.kind.github_repo',
   twitter_query: 'memorySources.kind.twitter_query',
@@ -200,6 +217,7 @@ export const SOURCE_KIND_LABEL_KEYS: Record<SourceKind, string> = {
 
 export const SOURCE_KIND_ICONS: Record<SourceKind, string> = {
   composio: '🔗',
+  conversation: '💬',
   folder: '📁',
   github_repo: '🐙',
   twitter_query: '🐦',

@@ -188,6 +188,16 @@ pub const BUILTINS: &[BuiltinAgent] = &[
         toml: include_str!("mcp_setup/agent.toml"),
         prompt_fn: super::mcp_setup::prompt::build,
     },
+    BuiltinAgent {
+        id: "agent_memory",
+        toml: include_str!("../../agent_memory/agent/agent.toml"),
+        prompt_fn: crate::openhuman::agent_memory::agent::prompt::build,
+    },
+    BuiltinAgent {
+        id: "subconscious",
+        toml: include_str!("../../subconscious/agent/agent.toml"),
+        prompt_fn: crate::openhuman::subconscious::agent::prompt::build,
+    },
 ];
 
 /// Parse every entry in [`BUILTINS`] into an [`AgentDefinition`].
@@ -211,11 +221,11 @@ pub fn load_builtins() -> Result<Vec<AgentDefinition>> {
 /// * `Reasoning` agents MUST NOT list another `Reasoning` agent in
 ///   `subagents`.
 /// * `Worker` agents MUST NOT list any [`SubagentEntry::AgentId`]
-///   entries. (Skill wildcards are allowed: they expand to the generic
+///   entries. (Workflow wildcards are allowed: they expand to the generic
 ///   `integrations_agent`, which is itself a `Worker`, and the call
 ///   happens via a single delegation tool rather than recursive spawn.)
 ///
-/// Skill-wildcard entries (`{ skills = "*" }`) are intentionally
+/// Workflow-wildcard entries (`{ skills = "*" }`) are intentionally
 /// untouched: they collapse to one `delegate_to_integrations_agent`
 /// tool whose target is a `Worker` and whose use sites are well
 /// understood. Mis-tiering of the `integrations_agent` itself is still
@@ -234,18 +244,22 @@ pub fn validate_tier_hierarchy(defs: &[AgentDefinition]) -> Result<()> {
         for entry in &def.subagents {
             let child_id = match entry {
                 SubagentEntry::AgentId(id) => id.as_str(),
-                // Skill wildcards always route to `integrations_agent`
+                // Workflow wildcards always route to `integrations_agent`
                 // (a Worker) via a single collapsed delegation tool —
                 // not subject to the tier-mismatch rule.
                 SubagentEntry::Skills(_) => continue,
             };
 
-            // Worker leaves: no spawn surface at all.
-            if def.agent_tier == AgentTier::Worker {
+            // Worker leaves: no open-ended spawn surface. A worker may still
+            // name `agent_memory` so the hidden `call_memory_agent` tool can
+            // be policy-gated by the same parent-context allowlist without
+            // synthesising visible delegate tools.
+            if def.agent_tier == AgentTier::Worker && child_id != "agent_memory" {
                 anyhow::bail!(
-                    "agent `{parent}` is a `worker` tier and must not list `{child}` (or any \
-                     agent) in its subagents — workers are leaf executors. Either remove the \
-                     entry or re-tier `{parent}` as `chat` / `reasoning`.",
+                    "agent `{parent}` is a `worker` tier and must not list `{child}` in its \
+                     subagents — workers are leaf executors except for the hidden `agent_memory` \
+                     retrieval policy. Either remove the entry or re-tier `{parent}` as `chat` / \
+                     `reasoning`.",
                     parent = def.id,
                     child = child_id,
                 );
@@ -312,12 +326,35 @@ fn parse_builtin(b: &BuiltinAgent) -> Result<AgentDefinition> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::openhuman::agent::harness::definition::{ModelSpec, SandboxMode, ToolScope};
+    use crate::openhuman::agent::harness::definition::{
+        ModelSpec, SandboxMode, SubagentEntry, ToolScope,
+    };
 
     #[test]
     fn all_builtins_parse() {
         let defs = load_builtins().expect("built-in TOML must parse");
         assert_eq!(defs.len(), BUILTINS.len());
+    }
+
+    #[test]
+    fn call_memory_agent_users_allow_agent_memory_subagent() {
+        for def in load_builtins().expect("built-in TOML must parse") {
+            let uses_call_memory_agent = match &def.tools {
+                ToolScope::Named(tools) => tools.iter().any(|tool| tool == "call_memory_agent"),
+                ToolScope::Wildcard => false,
+            };
+            if !uses_call_memory_agent {
+                continue;
+            }
+
+            assert!(
+                def.subagents.iter().any(|entry| {
+                    matches!(entry, SubagentEntry::AgentId(id) if id == "agent_memory")
+                }),
+                "{} exposes call_memory_agent but does not allow agent_memory in subagents",
+                def.id
+            );
+        }
     }
 
     #[test]
@@ -327,8 +364,8 @@ mod tests {
         match &def.tools {
             ToolScope::Named(tools) => {
                 assert!(
-                    tools.iter().any(|t| t == "memory_recall"),
-                    "trigger_reactor needs memory_recall"
+                    tools.iter().any(|t| t == "call_memory_agent"),
+                    "trigger_reactor needs call_memory_agent"
                 );
                 assert!(
                     tools.iter().any(|t| t == "memory_store"),
@@ -446,7 +483,6 @@ mod tests {
                         personality_soul_md: None,
                         personality_memory_md: None,
                         personality_roster: vec![],
-                        workflows: &[],
                     };
                     let body = build(&ctx)
                         .unwrap_or_else(|e| panic!("{} prompt build failed: {e}", def.id));
@@ -493,10 +529,9 @@ mod tests {
                     !tools.iter().any(|t| t == "spawn_subagent"),
                     "spawn_subagent must not appear — removed in #1141"
                 );
-                // consolidated memory_tree* → single memory_tree with mode dispatch
                 assert!(
-                    tools.iter().any(|t| t == "memory_tree"),
-                    "orchestrator must have memory_tree"
+                    tools.iter().any(|t| t == "call_memory_agent"),
+                    "orchestrator must have call_memory_agent"
                 );
                 assert!(!tools.iter().any(|t| t == "shell"));
                 assert!(!tools.iter().any(|t| t == "file_write"));
@@ -623,7 +658,7 @@ mod tests {
         match &presentation.tools {
             ToolScope::Named(names) => {
                 assert!(names.iter().any(|name| name == "generate_presentation"));
-                assert!(names.iter().any(|name| name == "memory_tree"));
+                assert!(names.iter().any(|name| name == "call_memory_agent"));
                 assert!(names.iter().any(|name| name == "web_search_tool"));
             }
             other => panic!("presentation_agent must use Named tool scope, got {other:?}"),
@@ -680,8 +715,8 @@ mod tests {
                     "help needs gitbooks_get_page"
                 );
                 assert!(
-                    tools.iter().any(|t| t == "memory_recall"),
-                    "help needs memory_recall for personalisation"
+                    tools.iter().any(|t| t == "call_memory_agent"),
+                    "help needs call_memory_agent for personalisation"
                 );
                 // Help is docs-only — no write/exec tools.
                 assert!(!tools.iter().any(|t| t == "shell"));
@@ -809,7 +844,7 @@ mod tests {
                 );
                 // Market grounding + context helpers. Pin the full set so a
                 // TOML edit that silently drops `stock_quote`,
-                // `stock_exchange_rate`, `memory_recall`, or `current_time`
+                // `stock_exchange_rate`, `call_memory_agent`, or `current_time`
                 // gets caught here — the agent's quote-before-execute
                 // discipline and "ground in user preferences before re-asking"
                 // behaviour both depend on these being present.
@@ -817,7 +852,7 @@ mod tests {
                     "stock_quote",
                     "stock_exchange_rate",
                     "stock_crypto_series",
-                    "memory_recall",
+                    "call_memory_agent",
                     "current_time",
                 ] {
                     assert!(
@@ -910,10 +945,10 @@ mod tests {
                     "markets_agent needs ask_user_clarification to gate write ops"
                 );
                 // Context helpers. Pin the full set so a TOML edit that
-                // silently drops `memory_recall` or `current_time` gets
+                // silently drops `call_memory_agent` or `current_time` gets
                 // caught here — the agent's "ground in user preferences"
                 // and "as of <when>" framing depend on these.
-                for required in ["memory_recall", "current_time"] {
+                for required in ["call_memory_agent", "current_time"] {
                     assert!(
                         tools.iter().any(|t| t == required),
                         "markets_agent needs supporting tool `{required}`"
@@ -1053,6 +1088,8 @@ mod tests {
 
     #[test]
     fn control_specialists_have_named_tools_and_are_worker_leaves() {
+        use crate::openhuman::agent::harness::definition::SubagentEntry;
+
         for expected in [
             "task_manager_agent",
             "settings_agent",
@@ -1062,7 +1099,18 @@ mod tests {
         ] {
             let def = find(expected);
             assert_eq!(def.agent_tier, AgentTier::Worker);
-            assert!(def.subagents.is_empty(), "{expected} must be a worker leaf");
+            let visible_subagents: Vec<&str> = def
+                .subagents
+                .iter()
+                .filter_map(|entry| match entry {
+                    SubagentEntry::AgentId(id) if id != "agent_memory" => Some(id.as_str()),
+                    _ => None,
+                })
+                .collect();
+            assert!(
+                visible_subagents.is_empty(),
+                "{expected} must be a worker leaf except for hidden agent_memory lookup"
+            );
             match def.tools {
                 ToolScope::Named(tools) => {
                     assert!(
@@ -1100,13 +1148,13 @@ mod tests {
     #[test]
     fn other_builtins_default_to_worker_tier() {
         for def in load_builtins().unwrap() {
-            if def.id == "orchestrator" || def.id == "planner" {
+            if def.id == "orchestrator" || def.id == "planner" || def.id == "subconscious" {
                 continue;
             }
             assert_eq!(
                 def.agent_tier,
                 AgentTier::Worker,
-                "{} should default to worker tier (only orchestrator/planner are non-worker today)",
+                "{} should default to worker tier (only orchestrator/planner/subconscious are non-worker today)",
                 def.id
             );
         }

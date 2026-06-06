@@ -1,11 +1,14 @@
 import { useCallback, useEffect, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 
 import { ConfirmationModal } from '../components/intelligence/ConfirmationModal';
+import IntelligenceAgentsTab from '../components/intelligence/IntelligenceAgentsTab';
 import IntelligenceSubconsciousTab from '../components/intelligence/IntelligenceSubconsciousTab';
 import IntelligenceTasksTab from '../components/intelligence/IntelligenceTasksTab';
 import MemorySection from '../components/intelligence/MemorySection';
 import ModelCouncilTab from '../components/intelligence/ModelCouncilTab';
 import { ToastContainer } from '../components/intelligence/Toast';
+import WorkflowsTab from '../components/intelligence/WorkflowsTab';
 import PillTabBar from '../components/PillTabBar';
 import {
   useIntelligenceSocket,
@@ -18,14 +21,49 @@ import type {
   ToastNotification,
 } from '../types/intelligence';
 import { IS_DEV } from '../utils/config';
-import AgentWorkflows from './AgentWorkflows';
 
-type IntelligenceTab = 'memory' | 'subconscious' | 'tasks' | 'workflows' | 'council';
+type IntelligenceTab = 'memory' | 'subconscious' | 'tasks' | 'agents' | 'workflows' | 'council';
+
+const INTELLIGENCE_TABS: IntelligenceTab[] = [
+  'memory',
+  'subconscious',
+  'tasks',
+  'agents',
+  'workflows',
+  'council',
+];
+
+// Tabs gated to dev builds (mirrors the `devOnly` flags on `allTabs` below).
+// A `?tab=` deep link must be validated against the *visible* set, not the raw
+// enum, so `?tab=council` can't force-open a hidden dev-only tab in prod.
+const DEV_ONLY_TABS: IntelligenceTab[] = ['council'];
+
+const isVisibleTab = (tab: string | null | undefined): tab is IntelligenceTab =>
+  (INTELLIGENCE_TABS as string[]).includes(tab ?? '') &&
+  (IS_DEV || !(DEV_ONLY_TABS as string[]).includes(tab ?? ''));
 
 export default function Intelligence() {
   const { t } = useT();
 
-  const [activeTab, setActiveTab] = useState<IntelligenceTab>('memory');
+  // Tab is URL-backed (`/intelligence?tab=…`) so navigating away — e.g. to
+  // Settings → Task Sources from the Agent Tasks tab — and coming back via
+  // browser-back restores the same tab instead of resetting to Memory.
+  // `replace` so switching tabs doesn't stack history entries.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const tabParam = searchParams.get('tab');
+  const activeTab: IntelligenceTab = isVisibleTab(tabParam) ? tabParam : 'tasks';
+  const setActiveTab = useCallback(
+    (tab: IntelligenceTab) => {
+      setSearchParams(
+        prev => {
+          prev.set('tab', tab);
+          return prev;
+        },
+        { replace: true }
+      );
+    },
+    [setSearchParams]
+  );
 
   // The legacy header pills (system-status + Ingesting/Queued chips) were
   // sourced from `useConsciousItems` + `useMemoryIngestionStatus`. They are
@@ -89,28 +127,23 @@ export default function Intelligence() {
     comingSoon?: boolean;
     devOnly?: boolean;
   }[] = [
-    {
-      id: 'tasks',
-      label: t('memory.tab.tasks'),
-      description: t('memory.tab.tasksDescription'),
-      devOnly: true,
-    },
+    { id: 'tasks', label: t('memory.tab.tasks'), description: t('memory.tab.tasksDescription') },
     { id: 'memory', label: t('memory.tab.memory') },
     { id: 'subconscious', label: t('memory.tab.subconscious') },
     {
       id: 'workflows',
       label: t('memory.tab.workflows'),
       description: t('memory.tab.workflowsDescription'),
-      devOnly: true,
     },
     { id: 'council', label: t('memory.tab.council'), devOnly: true },
+    { id: 'agents', label: t('memory.tab.agents'), description: t('memory.tab.agentsDescription') },
   ];
   const tabs = allTabs.filter(tab => !tab.devOnly || IS_DEV);
   const activeTabDef = tabs.find(tab => tab.id === activeTab);
 
   return (
     <div className="min-h-full p-4 pt-6">
-      <div className="max-w-2xl mx-auto space-y-4">
+      <div className="max-w-4xl mx-auto space-y-4">
         <PillTabBar
           items={tabs.map(tab => ({ label: tab.label, value: tab.id }))}
           selected={activeTab}
@@ -182,7 +215,9 @@ export default function Intelligence() {
 
             {activeTab === 'tasks' && <IntelligenceTasksTab />}
 
-            {activeTab === 'workflows' && <AgentWorkflows />}
+            {activeTab === 'agents' && <IntelligenceAgentsTab />}
+
+            {activeTab === 'workflows' && <WorkflowsTab />}
 
             {activeTab === 'council' && <ModelCouncilTab />}
           </div>
