@@ -1,4 +1,5 @@
 export const CORE_RPC_METHODS = {
+  channelsList: 'openhuman.channels_list',
   configGet: 'openhuman.config_get',
   configGetAgentPaths: 'openhuman.config_get_agent_paths',
   configGetAgentSettings: 'openhuman.config_get_agent_settings',
@@ -66,6 +67,9 @@ export const CORE_RPC_METHODS = {
 export type CoreRpcMethod = (typeof CORE_RPC_METHODS)[keyof typeof CORE_RPC_METHODS];
 
 export const LEGACY_METHOD_ALIASES: Record<string, CoreRpcMethod> = {
+  // Channels — older 0.53.x clients emitted dotted RPC names before the
+  // canonical `openhuman.channels_list` underscore form stabilized.
+  'channels.list': CORE_RPC_METHODS.channelsList,
   // MCP clients — old method names that appeared in Sentry (CORE-RUST-DR/DS/DT/DV/DW).
   // See src/core/legacy_aliases.rs for the Rust-side mirror of this table.
   'mcp_clients.list': CORE_RPC_METHODS.mcpClientsInstalledList,
@@ -73,6 +77,7 @@ export const LEGACY_METHOD_ALIASES: Record<string, CoreRpcMethod> = {
   'openhuman.mcp_list': CORE_RPC_METHODS.mcpClientsInstalledList,
   'openhuman.mcp_servers_list': CORE_RPC_METHODS.mcpClientsInstalledList,
   'openhuman.tool_registry_call': CORE_RPC_METHODS.mcpClientsToolCall,
+  'openhuman.channels.list': CORE_RPC_METHODS.channelsList,
   'openhuman.get_analytics_settings': CORE_RPC_METHODS.configGetAnalyticsSettings,
   'openhuman.get_composio_trigger_settings': CORE_RPC_METHODS.configGetComposioTriggerSettings,
   'openhuman.get_dashboard_settings': CORE_RPC_METHODS.configGetDashboardSettings,

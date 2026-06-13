@@ -21,6 +21,9 @@
 /// Order doesn't matter for correctness, but is kept alphabetical by legacy
 /// key for easier diffing against the frontend table.
 const LEGACY_ALIASES: &[(&str, &str)] = &[
+    // Channels — older 0.53.x clients emitted dotted RPC names before the
+    // canonical `openhuman.channels_list` underscore form stabilized.
+    ("channels.list", "openhuman.channels_list"),
     // MCP clients — old method names that appeared in Sentry (CORE-RUST-DR/DS/DT/DV/DW).
     // Callers used dotted namespace, bare `mcp_list`, `mcp_servers_list`, and
     // `mcp_clients_list` before the canonical `mcp_clients_installed_list` was
@@ -32,6 +35,7 @@ const LEGACY_ALIASES: &[(&str, &str)] = &[
         "openhuman.get_analytics_settings",
         "openhuman.config_get_analytics_settings",
     ),
+    ("openhuman.channels.list", "openhuman.channels_list"),
     (
         "openhuman.get_composio_trigger_settings",
         "openhuman.config_get_composio_trigger_settings",
@@ -464,6 +468,17 @@ mod tests {
         assert_eq!(
             resolve_legacy("openhuman.update_composio_trigger_settings"),
             "openhuman.config_update_composio_trigger_settings",
+        );
+    }
+
+    #[test]
+    fn resolve_legacy_rewrites_dotted_channels_list() {
+        // Older 0.53.x bundles issued dotted channels-list RPC names while
+        // the registered method is the underscore canonical form.
+        assert_eq!(resolve_legacy("channels.list"), "openhuman.channels_list");
+        assert_eq!(
+            resolve_legacy("openhuman.channels.list"),
+            "openhuman.channels_list",
         );
     }
 
