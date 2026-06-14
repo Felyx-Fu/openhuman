@@ -104,8 +104,10 @@ pub struct InstallWorkflowFromUrlOutcome {
 /// * Frontmatter is validated — `name` and `description` are required per
 ///   the agentskills.io spec.
 /// * The slug is derived from `metadata.id` when present, otherwise the
-///   sanitized `name` field. Collision with an existing directory is fatal
-///   (no silent overwrite).
+///   sanitized `name` field. If the target directory already contains a
+///   `SKILL.md`, the install is treated as an idempotent success and reports
+///   that the skill is already installed. Other directory collisions remain
+///   fatal, and existing files are never silently overwritten.
 /// * Write is atomic: `SKILL.md.tmp` in the target dir, then `rename` on
 ///   success.
 ///

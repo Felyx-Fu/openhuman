@@ -52,7 +52,6 @@ function catalogInstallKeys(entry: CatalogEntry): string[] {
   return [
     slugifyInstallKey(entry.id),
     slugifyInstallKey(lastPathSegment(entry.id)),
-    slugifyInstallKey(entry.name),
     slugifyInstallKey(parentPathSegment(entry.docs_path)),
     slugifyInstallKey(parentPathSegment(entry.download_url)),
   ].filter((key): key is string => Boolean(key));
@@ -61,7 +60,6 @@ function catalogInstallKeys(entry: CatalogEntry): string[] {
 function workflowInstallKeys(skill: WorkflowSummary): string[] {
   return [
     slugifyInstallKey(skill.id),
-    slugifyInstallKey(skill.name),
     slugifyInstallKey(parentPathSegment(skill.location)),
   ].filter((key): key is string => Boolean(key));
 }
