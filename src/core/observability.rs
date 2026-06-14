@@ -1842,6 +1842,46 @@ pub fn is_transient_provider_transport_failure(event: &sentry::protocol::Event<'
     event_has_transient_transport_phrase(event)
 }
 
+/// Defense-in-depth filter for aggregate provider exhaustion events where the
+/// aggregate only restates transient attempt failures.
+///
+/// Keep ordinary `failure=all_exhausted` events: they are the useful "every
+/// fallback failed" signal. Drop only the narrow shape observed in #3542,
+/// where the aggregate body starts with the reliable-provider exhaustion
+/// prefix and contains transient HTTP/transport wording already classified by
+/// [`is_transient_message_failure`].
+pub fn is_all_transient_provider_exhaustion_event(event: &sentry::protocol::Event<'_>) -> bool {
+    let tags = &event.tags;
+    if tags.get("domain").map(String::as_str) != Some("llm_provider") {
+        return false;
+    }
+    if tags.get("failure").map(String::as_str) != Some("all_exhausted") {
+        return false;
+    }
+
+    let direct = event.message.as_deref();
+    let from_logentry = event.logentry.as_ref().map(|log| log.message.as_str());
+    let from_exception = event.exception.last().and_then(|e| e.value.as_deref());
+    [direct, from_logentry, from_exception]
+        .into_iter()
+        .flatten()
+        .any(all_provider_attempts_are_transient)
+}
+
+fn all_provider_attempts_are_transient(message: &str) -> bool {
+    let Some(attempts) = message.strip_prefix("All providers/models failed. Attempts:") else {
+        return false;
+    };
+    let mut saw_attempt = false;
+    for attempt in attempts.split(';').map(str::trim).filter(|s| !s.is_empty()) {
+        saw_attempt = true;
+        if !is_transient_message_failure(attempt) {
+            return false;
+        }
+    }
+    saw_attempt
+}
+
 /// Returns true when a Sentry event's message/exception text contains the
 /// canonical max-tool-iterations cap phrase (see
 /// `openhuman::agent::error::MAX_ITERATIONS_ERROR_PREFIX`).

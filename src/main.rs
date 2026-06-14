@@ -59,6 +59,11 @@ fn main() {
             if openhuman_core::core::observability::is_transient_provider_http_failure(&event) {
                 return None;
             }
+            if openhuman_core::core::observability::is_all_transient_provider_exhaustion_event(
+                &event,
+            ) {
+                return None;
+            }
             // Defense-in-depth: drop managed-backend `errorCode` events (#870)
             // the backend owns (F2/F4) — primary suppression lives in
             // `api_error` / the streaming gates and the `web_channel`
