@@ -1,5 +1,6 @@
 use super::traits::{ChatMessage, ChatRequest, ChatResponse};
 use super::Provider;
+use crate::openhuman::inference::provider::record_resolved_provider_route;
 use async_trait::async_trait;
 use std::collections::HashMap;
 
@@ -177,6 +178,7 @@ impl Provider for RouterProvider {
             "Router dispatching request"
         );
 
+        record_resolved_provider_route(provider_name, &resolved_model);
         provider
             .chat_with_system(system_prompt, message, &resolved_model, temperature)
             .await
@@ -189,7 +191,8 @@ impl Provider for RouterProvider {
         temperature: f64,
     ) -> anyhow::Result<String> {
         let (provider_idx, resolved_model) = self.resolve(model);
-        let (_, provider) = &self.providers[provider_idx];
+        let (provider_name, provider) = &self.providers[provider_idx];
+        record_resolved_provider_route(provider_name, &resolved_model);
         provider
             .chat_with_history(messages, &resolved_model, temperature)
             .await
@@ -202,7 +205,8 @@ impl Provider for RouterProvider {
         temperature: f64,
     ) -> anyhow::Result<ChatResponse> {
         let (provider_idx, resolved_model) = self.resolve(model);
-        let (_, provider) = &self.providers[provider_idx];
+        let (provider_name, provider) = &self.providers[provider_idx];
+        record_resolved_provider_route(provider_name, &resolved_model);
         provider.chat(request, &resolved_model, temperature).await
     }
 
@@ -214,7 +218,8 @@ impl Provider for RouterProvider {
         temperature: f64,
     ) -> anyhow::Result<ChatResponse> {
         let (provider_idx, resolved_model) = self.resolve(model);
-        let (_, provider) = &self.providers[provider_idx];
+        let (provider_name, provider) = &self.providers[provider_idx];
+        record_resolved_provider_route(provider_name, &resolved_model);
         provider
             .chat_with_tools(messages, tools, &resolved_model, temperature)
             .await

@@ -19,6 +19,7 @@ mod openai_codex;
 pub mod openhuman_backend;
 pub mod ops;
 pub mod reliable;
+pub mod resolved_route;
 pub mod router;
 pub mod schemas;
 pub mod temperature;
@@ -43,3 +44,7 @@ pub use error_code::{
 };
 pub use factory::{create_chat_provider, provider_for_role, BYOK_INCOMPLETE_SENTINEL};
 pub use ops::*;
+pub use resolved_route::{
+    current_resolved_provider_route, record_resolved_provider_route,
+    with_resolved_provider_route_scope, ResolvedProviderRoute,
+};
