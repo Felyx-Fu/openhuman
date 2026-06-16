@@ -265,6 +265,17 @@ const handleAuthDeepLink = async (parsed: URL, requireStateNonce = true) => {
         { requiresAppDataReset: true }
       );
     } else {
+      const kind = classifyAuthStoreFailure(rawMessage);
+      // Make the bounce observable. `beforeSend` deletes `event.extra`, so carry
+      // the classification on a TAG (survives) + a stable fingerprint so every
+      // session-store failure groups together and is alertable. The exception
+      // message ("Session validation failed (GET /auth/me): …") carries no token.
+      Sentry.captureException(error instanceof Error ? error : new Error(rawMessage), {
+        level: 'error',
+        tags: { surface: 'react', phase: 'deep-link-auth-store', auth_store_failure: kind },
+        fingerprint: ['deep-link-auth', 'session-store-failed', kind],
+      });
+      console.warn('[DeepLink][auth] session store failed — staying on signin (kind=%s)', kind);
       failDeepLinkAuthProcessing('Sign-in failed. Please try again.');
     }
   }
@@ -277,6 +288,28 @@ const isDecryptionFailure = (message: string): boolean => {
     lowered.includes('wrong key or tampered data') ||
     lowered.includes('corrupt data')
   );
+};
+
+/**
+ * Classify a sign-in *store* failure into a short, PII-free kind. A store-time
+ * `/auth/me` failure (esp. a timeout) is the lead root cause of "OAuth succeeded
+ * but the app is back on the login page", yet it currently emits NO Sentry signal
+ * on any layer: the FE has no console-capture integration, the Rust core drops
+ * `"timeout"`/408/504 as transient (`observability.rs`), and the backend only
+ * pages genuine 500s (`shouldHandleError: status === 500`, BACKEND-ALPHAHUMAN-40)
+ * — so gateway/timeout 5xx never reach Sentry. Tagging the kind here is the one
+ * place the bounce becomes debuggable. Returns a stable enum-like string (no URLs,
+ * no tokens) safe to use as a Sentry tag / fingerprint.
+ */
+export const classifyAuthStoreFailure = (message: string): string => {
+  const m = message.toLowerCase();
+  if (/timed out|timeout|operation timed out|deadline/.test(m)) return 'auth_me_timeout';
+  if (/\b401\b|unauthorized/.test(m)) return 'auth_me_unauthorized';
+  if (/\b50[234]\b|bad gateway|service unavailable|gateway timeout/.test(m))
+    return 'auth_me_gateway';
+  if (/network|fetch failed|connection|dns|unreachable/.test(m)) return 'network';
+  if (/auth\/me|session validation failed/.test(m)) return 'auth_me_other';
+  return 'other';
 };
 
 /**
