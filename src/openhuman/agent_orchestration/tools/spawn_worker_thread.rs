@@ -227,6 +227,8 @@ impl Tool for SpawnWorkerThreadTool {
             worker_thread_id: Some(worker_thread_id.clone()),
             initial_history: None,
             checkpoint_dir: None,
+            worktree_action_dir: None,
+            run_queue: None,
         };
 
         tracing::debug!(
@@ -385,7 +387,7 @@ mod tests {
             channel: "test".into(),
             all_tools: Arc::new(vec![]),
             all_tool_specs: Arc::new(vec![]),
-            skills: Arc::new(vec![]),
+            workflows: Arc::new(vec![]),
             memory_context: std::sync::Arc::new(None),
             connected_integrations: vec![],
             on_progress: None,

@@ -145,6 +145,68 @@ describe('SubagentActivityBlock', () => {
     await userEvent.click(btn);
     expect(onView).toHaveBeenCalledTimes(1);
   });
+
+  it('renders the inline worktree block + actions when worktreePath is set (#3376)', () => {
+    renderInStore(
+      <SubagentActivityBlock
+        subagent={{
+          taskId: 't',
+          agentId: 'coder',
+          toolCalls: [],
+          worktreePath: '/r/.claude/worktrees/worker-a',
+          changedFiles: ['src/lib.rs'],
+          isDirty: true,
+        }}
+      />
+    );
+    const block = screen.getByTestId('subagent-worktree');
+    expect(block).toBeInTheDocument();
+    // Compact label shows the basename, not the full path.
+    expect(block).toHaveTextContent('worker-a');
+    expect(screen.getByTestId('worktree-actions')).toBeInTheDocument();
+    expect(screen.getByTestId('worktree-remove')).toBeInTheDocument();
+  });
+
+  it('omits the worktree block for a non-isolated subagent', () => {
+    renderInStore(
+      <SubagentActivityBlock subagent={{ taskId: 't', agentId: 'researcher', toolCalls: [] }} />
+    );
+    expect(screen.queryByTestId('subagent-worktree')).toBeNull();
+  });
+});
+
+describe('ToolTimelineBlock — agentic task insights surface', () => {
+  it('wraps rows in the "Agentic task insights" group and conveys run state on the name', () => {
+    const entries: ToolTimelineEntry[] = [
+      { id: 'r', name: 'web_search', round: 1, status: 'running', argsBuffer: '{"query":"f1"}' },
+      {
+        id: 'd',
+        name: 'file_read',
+        round: 1,
+        status: 'success',
+        argsBuffer: '{"path":"/a/b.txt"}',
+      },
+    ];
+    renderInStore(<ToolTimelineBlock entries={entries} />);
+    const group = screen.getByTestId('agent-task-insights');
+    expect(group).toBeInTheDocument();
+    // Static section label — NOT a duplicate "Working…" string (the live
+    // state lives on the pulsing row names, not the header).
+    expect(group.textContent).toContain('Agentic task insights');
+    expect(group.textContent).not.toContain('Working');
+    // Two rows on the timeline rail.
+    expect(screen.getAllByTestId('agent-timeline-row')).toHaveLength(2);
+    // Running row name pulses; done row name is solid.
+    const running = screen.getByText('Searching: f1');
+    const done = screen.getByText('Reading file');
+    expect(running.className).toContain('animate-pulse');
+    expect(done.className).not.toContain('animate-pulse');
+  });
+
+  it('renders nothing for an empty timeline', () => {
+    const { container } = renderInStore(<ToolTimelineBlock entries={[]} />);
+    expect(container.querySelector('[data-testid="agent-task-insights"]')).toBeNull();
+  });
 });
 
 describe('ToolTimelineBlock — subagent rendering', () => {

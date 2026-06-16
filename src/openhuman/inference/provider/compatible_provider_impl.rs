@@ -7,7 +7,6 @@ use futures_util::{stream, StreamExt};
 
 use super::compatible_dump::{dump_prompt_if_enabled, dump_response_if_enabled, reserve_dump_seq};
 use super::compatible_parse::normalize_function_arguments;
-use super::compatible_repeat::CHAT_FREQUENCY_PENALTY;
 use super::compatible_stream::sse_bytes_to_chunks;
 use super::compatible_types::{
     ApiChatRequest, ApiChatResponse, Message, MessageContent, NativeChatRequest,
@@ -20,10 +19,7 @@ impl Provider for OpenAiCompatibleProvider {
     fn capabilities(&self) -> crate::openhuman::inference::provider::traits::ProviderCapabilities {
         crate::openhuman::inference::provider::traits::ProviderCapabilities {
             native_tool_calling: self.native_tool_calling,
-            // Kept `false` for now — vision is a per-*model* property the provider
-            // can't know here; the Responses-API path is still text-only. Stays off
-            // until it can be driven per-model (e.g. from `model_registry.vision`).
-            vision: false,
+            vision: self.vision,
         }
     }
 
@@ -84,7 +80,7 @@ impl Provider for OpenAiCompatibleProvider {
 
         if self.responses_api_primary {
             return self
-                .chat_via_responses(credential, &fallback_messages, model)
+                .chat_via_responses(credential, &fallback_messages, model, None)
                 .await;
         }
 
@@ -98,7 +94,7 @@ impl Provider for OpenAiCompatibleProvider {
                 if self.supports_responses_fallback {
                     let detail = super::super::format_error_chain(&chat_error);
                     return self
-                        .chat_via_responses(credential, &fallback_messages, model)
+                        .chat_via_responses(credential, &fallback_messages, model, None)
                         .await
                         .map_err(|responses_err| {
                             let fb = super::super::format_anyhow_chain(&responses_err);
@@ -128,7 +124,7 @@ impl Provider for OpenAiCompatibleProvider {
 
             if status == reqwest::StatusCode::NOT_FOUND && self.supports_responses_fallback {
                 return self
-                    .chat_via_responses(credential, &fallback_messages, model)
+                    .chat_via_responses(credential, &fallback_messages, model, None)
                     .await
                     .map_err(|responses_err| {
                         let fb = super::super::format_anyhow_chain(&responses_err);
@@ -182,6 +178,17 @@ impl Provider for OpenAiCompatibleProvider {
                 &error,
             ) {
                 super::super::log_provider_config_rejection(
+                    "chat_completions",
+                    self.name.as_str(),
+                    Some(model),
+                    status,
+                );
+            } else if super::super::is_byo_provider_auth_failure_http(
+                self.name.as_str(),
+                status,
+                &error,
+            ) {
+                super::super::log_byo_provider_auth_failure(
                     "chat_completions",
                     self.name.as_str(),
                     Some(model),
@@ -256,7 +263,7 @@ impl Provider for OpenAiCompatibleProvider {
         let url = self.chat_completions_url();
         if self.responses_api_primary {
             return self
-                .chat_via_responses(credential, &effective_messages, model)
+                .chat_via_responses(credential, &effective_messages, model, None)
                 .await;
         }
 
@@ -270,7 +277,7 @@ impl Provider for OpenAiCompatibleProvider {
                 if self.supports_responses_fallback {
                     let detail = super::super::format_error_chain(&chat_error);
                     return self
-                        .chat_via_responses(credential, &effective_messages, model)
+                        .chat_via_responses(credential, &effective_messages, model, None)
                         .await
                         .map_err(|responses_err| {
                             let fb = super::super::format_anyhow_chain(&responses_err);
@@ -298,7 +305,7 @@ impl Provider for OpenAiCompatibleProvider {
 
                 if self.supports_responses_fallback {
                     return self
-                        .chat_via_responses(credential, &effective_messages, model)
+                        .chat_via_responses(credential, &effective_messages, model, None)
                         .await
                         .map_err(|responses_err| {
                             let fb = super::super::format_anyhow_chain(&responses_err);
@@ -439,9 +446,19 @@ impl Provider for OpenAiCompatibleProvider {
                 let name = function.name?;
                 let arguments = normalize_function_arguments(function.arguments);
                 Some(ProviderToolCall {
-                    id: tc.id.unwrap_or_else(|| uuid::Uuid::new_v4().to_string()),
+                    // Treat an empty-string id like a missing one: some providers
+                    // (DashScope/GMI) return `""` rather than omitting it, and an
+                    // empty `tool_call_id` is rejected by the upstream tool-message
+                    // ordering check on the next turn.
+                    id: tc
+                        .id
+                        .filter(|s| !s.is_empty())
+                        .unwrap_or_else(|| uuid::Uuid::new_v4().to_string()),
                     name,
                     arguments,
+                    // Non-streaming response: preserve Gemini's thought_signature
+                    // so it round-trips on the next turn (TAURI-RUST-4PK).
+                    extra_content: tc.extra_content,
                 })
             })
             .collect::<Vec<_>>();
@@ -483,7 +500,7 @@ impl Provider for OpenAiCompatibleProvider {
                 effective_messages.clone()
             };
             let text = self
-                .chat_via_responses(credential, &response_messages, model)
+                .chat_via_responses(credential, &response_messages, model, request.max_tokens)
                 .await?;
             if let Some(tx) = request.stream {
                 let _ = tx
@@ -515,7 +532,11 @@ impl Provider for OpenAiCompatibleProvider {
                     include_usage: true,
                 }),
                 options: self.build_ollama_options(),
-                frequency_penalty: Some(CHAT_FREQUENCY_PENALTY),
+                // Omitted for endpoints whose OpenAI-compat surface 400s on the
+                // field (Google Gemini shim — TAURI-RUST-4PJ); the reactive
+                // retry below stays as defense-in-depth for unknown providers.
+                frequency_penalty: self.effective_frequency_penalty(),
+                max_tokens: request.max_tokens,
             };
             let stream_dump_seq = reserve_dump_seq();
             dump_prompt_if_enabled(&self.name, model, stream_dump_seq, &native_request);
@@ -602,6 +623,7 @@ impl Provider for OpenAiCompatibleProvider {
             // The buffered non-streaming path omits `frequency_penalty` for maximum
             // compatibility. The streaming path carries it and retries without on rejection.
             frequency_penalty: None,
+            max_tokens: request.max_tokens,
         };
         let dump_seq = reserve_dump_seq();
         dump_prompt_if_enabled(&self.name, model, dump_seq, &native_request);
@@ -620,7 +642,12 @@ impl Provider for OpenAiCompatibleProvider {
                 if self.supports_responses_fallback {
                     let detail = super::super::format_error_chain(&chat_error);
                     return self
-                        .chat_via_responses(credential, &effective_messages, model)
+                        .chat_via_responses(
+                            credential,
+                            &effective_messages,
+                            model,
+                            request.max_tokens,
+                        )
                         .await
                         .map(|text| ProviderChatResponse {
                             text: Some(text),
@@ -670,7 +697,7 @@ impl Provider for OpenAiCompatibleProvider {
 
             if status == reqwest::StatusCode::NOT_FOUND && self.supports_responses_fallback {
                 return self
-                    .chat_via_responses(credential, &effective_messages, model)
+                    .chat_via_responses(credential, &effective_messages, model, request.max_tokens)
                     .await
                     .map(|text| ProviderChatResponse {
                         text: Some(text),
@@ -723,6 +750,28 @@ impl Provider for OpenAiCompatibleProvider {
                 &error,
             ) {
                 super::super::log_provider_config_rejection(
+                    "native_chat",
+                    self.name.as_str(),
+                    Some(model),
+                    status,
+                );
+            } else if super::super::is_byo_provider_auth_failure_http(
+                self.name.as_str(),
+                status,
+                &error,
+            ) {
+                super::super::log_byo_provider_auth_failure(
+                    "native_chat",
+                    self.name.as_str(),
+                    Some(model),
+                    status,
+                );
+            } else if super::super::is_provider_insufficient_credits_402(status, &error) {
+                // Residual 402 after the request already caps max_tokens: the
+                // user's own BYO provider balance is exhausted — no local lever,
+                // so demote to info instead of paging on every retry
+                // (TAURI-RUST-C62).
+                super::super::log_provider_insufficient_credits_402(
                     "native_chat",
                     self.name.as_str(),
                     Some(model),
@@ -839,16 +888,33 @@ impl Provider for OpenAiCompatibleProvider {
             let response = match req_builder.send().await {
                 Ok(r) => r,
                 Err(e) => {
-                    crate::core::observability::report_error(
-                        e.to_string().as_str(),
-                        "llm_provider",
-                        "stream_chat",
-                        &[
-                            ("provider", provider_name.as_str()),
-                            ("model", model_owned.as_str()),
-                            ("failure", "transport"),
-                        ],
-                    );
+                    let detail = e.to_string();
+                    // F7: a flaky-network timeout / reset / TLS-handshake EOF on
+                    // the streaming send is transient transport noise the
+                    // socket layer recovers from — gate it so those blips stop
+                    // paging Sentry. A non-transient transport failure (DNS
+                    // misconfig, unexpected protocol error) still reports.
+                    if crate::core::observability::contains_transient_transport_phrase(&detail) {
+                        tracing::debug!(
+                            domain = "llm_provider",
+                            operation = "stream_chat",
+                            provider = provider_name.as_str(),
+                            model = model_owned.as_str(),
+                            failure = "transport",
+                            "[llm_provider] stream_chat transient transport error — not reporting to Sentry: {detail}"
+                        );
+                    } else {
+                        crate::core::observability::report_error(
+                            detail.as_str(),
+                            "llm_provider",
+                            "stream_chat",
+                            &[
+                                ("provider", provider_name.as_str()),
+                                ("model", model_owned.as_str()),
+                                ("failure", "transport"),
+                            ],
+                        );
+                    }
                     let _ = tx.send(Err(StreamError::Http(e))).await;
                     return;
                 }
@@ -900,6 +966,31 @@ impl Provider for OpenAiCompatibleProvider {
                     &raw_error,
                 ) {
                     crate::openhuman::inference::provider::log_provider_config_rejection(
+                        "stream_chat",
+                        provider_name.as_str(),
+                        Some(model_owned.as_str()),
+                        status,
+                    );
+                } else if crate::openhuman::inference::provider::is_backend_error_code_owned(
+                    provider_name.as_str(),
+                    &raw_error,
+                ) {
+                    // F4/F2: managed-backend errorCode (#870) — backend-owned;
+                    // the FE must not double-report. Malformed BAD_REQUEST is
+                    // excluded and reaches the status gate (it pages — F8).
+                    crate::openhuman::inference::provider::log_backend_error_code_owned(
+                        "stream_chat",
+                        provider_name.as_str(),
+                        Some(model_owned.as_str()),
+                        status,
+                        &raw_error,
+                    );
+                } else if crate::openhuman::inference::provider::is_byo_provider_auth_failure_http(
+                    provider_name.as_str(),
+                    status,
+                    &raw_error,
+                ) {
+                    crate::openhuman::inference::provider::log_byo_provider_auth_failure(
                         "stream_chat",
                         provider_name.as_str(),
                         Some(model_owned.as_str()),
@@ -1015,16 +1106,32 @@ impl Provider for OpenAiCompatibleProvider {
             let response = match req_builder.send().await {
                 Ok(response) => response,
                 Err(error) => {
-                    crate::core::observability::report_error(
-                        error.to_string().as_str(),
-                        "llm_provider",
-                        "stream_chat_history",
-                        &[
-                            ("provider", provider_name.as_str()),
-                            ("model", model_owned.as_str()),
-                            ("failure", "transport"),
-                        ],
-                    );
+                    let detail = error.to_string();
+                    // F7: gate transient transport blips (timeout / reset / TLS
+                    // handshake EOF) so flaky-network failures on the streaming
+                    // send stop paging Sentry; non-transient transport errors
+                    // still report.
+                    if crate::core::observability::contains_transient_transport_phrase(&detail) {
+                        tracing::debug!(
+                            domain = "llm_provider",
+                            operation = "stream_chat_history",
+                            provider = provider_name.as_str(),
+                            model = model_owned.as_str(),
+                            failure = "transport",
+                            "[llm_provider] stream_chat_history transient transport error — not reporting to Sentry: {detail}"
+                        );
+                    } else {
+                        crate::core::observability::report_error(
+                            detail.as_str(),
+                            "llm_provider",
+                            "stream_chat_history",
+                            &[
+                                ("provider", provider_name.as_str()),
+                                ("model", model_owned.as_str()),
+                                ("failure", "transport"),
+                            ],
+                        );
+                    }
                     let _ = tx.send(Err(StreamError::Http(error))).await;
                     return;
                 }
@@ -1081,6 +1188,31 @@ impl Provider for OpenAiCompatibleProvider {
                         Some(model_owned.as_str()),
                         status,
                     );
+                } else if crate::openhuman::inference::provider::is_backend_error_code_owned(
+                    provider_name.as_str(),
+                    &raw_error,
+                ) {
+                    // F4/F2: managed-backend errorCode (#870) — backend-owned;
+                    // the FE must not double-report. Malformed BAD_REQUEST is
+                    // excluded and reaches the status gate (it pages — F8).
+                    crate::openhuman::inference::provider::log_backend_error_code_owned(
+                        "stream_chat_history",
+                        provider_name.as_str(),
+                        Some(model_owned.as_str()),
+                        status,
+                        &raw_error,
+                    );
+                } else if crate::openhuman::inference::provider::is_byo_provider_auth_failure_http(
+                    provider_name.as_str(),
+                    status,
+                    &raw_error,
+                ) {
+                    crate::openhuman::inference::provider::log_byo_provider_auth_failure(
+                        "stream_chat_history",
+                        provider_name.as_str(),
+                        Some(model_owned.as_str()),
+                        status,
+                    );
                 } else if crate::openhuman::inference::provider::should_report_provider_http_failure(
                     status,
                 ) {
@@ -1123,5 +1255,89 @@ impl Provider for OpenAiCompatibleProvider {
                 .await?;
         }
         Ok(())
+    }
+
+    /// Resolve the effective context window for pre-dispatch trimming.
+    ///
+    /// For cloud (non-local) providers this is the static model table. For
+    /// local providers the trained-maximum table over-estimates the window
+    /// the runtime actually enforces — LM Studio lets the user load a model
+    /// with a smaller `n_ctx`, and budgeting against the max overflows it
+    /// (#3550 / Sentry TAURI-RUST-6V0). So for LM Studio we query the native
+    /// `/api/v0/models` endpoint for the model's loaded context window, and
+    /// fall back to the provider-profile default when it's unavailable.
+    async fn effective_context_window(&self, model: &str) -> Option<u64> {
+        use crate::openhuman::inference::local::profile::LocalProviderKind;
+        let Some(kind) = self.local_provider_kind else {
+            return crate::openhuman::inference::context_window_for_model(model);
+        };
+        // LM Studio: the OpenAI-compat /v1/models hides the context window, but
+        // the native /api/v0/models reports the loaded n_ctx. Prefer it.
+        if kind == LocalProviderKind::LmStudio {
+            if let Some(window) = self.lm_studio_loaded_context_window(model).await {
+                return Some(window);
+            }
+        }
+        // Local fallback: pattern table → provider-profile default. Ensures
+        // unknown local models still get trimmed instead of skipped.
+        crate::openhuman::inference::model_context::context_window_for_model_with_local_fallback(
+            model,
+            Some(kind),
+        )
+    }
+}
+
+impl OpenAiCompatibleProvider {
+    /// Best-effort fetch of the model's loaded context window from LM Studio's
+    /// native `/api/v0/models` endpoint. Returns `None` on any transport /
+    /// parse error or when the model reports no window — callers then fall
+    /// back to the profile default. Never panics, never propagates errors.
+    async fn lm_studio_loaded_context_window(&self, model: &str) -> Option<u64> {
+        use crate::openhuman::inference::local::lm_studio;
+        let url = lm_studio::lm_studio_native_models_url(&self.base_url);
+        let resp = match self
+            .apply_auth_header(self.http_client().get(&url), self.credential.as_deref())
+            .send()
+            .await
+        {
+            Ok(resp) => resp,
+            Err(err) => {
+                tracing::debug!(
+                    provider = %self.name,
+                    model,
+                    error = %err,
+                    "[lm-studio] native models probe transport error; using profile default context window"
+                );
+                return None;
+            }
+        };
+        if !resp.status().is_success() {
+            tracing::debug!(
+                provider = %self.name,
+                status = resp.status().as_u16(),
+                "[lm-studio] native models probe non-success; using profile default context window"
+            );
+            return None;
+        }
+        let parsed: lm_studio::LmStudioNativeModelsResponse = match resp.json().await {
+            Ok(parsed) => parsed,
+            Err(err) => {
+                tracing::debug!(
+                    provider = %self.name,
+                    model,
+                    error = %err,
+                    "[lm-studio] native models probe parse error; using profile default context window"
+                );
+                return None;
+            }
+        };
+        let window = lm_studio::lm_studio_context_window_for(&parsed, model);
+        tracing::debug!(
+            provider = %self.name,
+            model,
+            loaded_context_window = window.unwrap_or(0),
+            "[lm-studio] resolved loaded context window for pre-dispatch trimming"
+        );
+        window
     }
 }

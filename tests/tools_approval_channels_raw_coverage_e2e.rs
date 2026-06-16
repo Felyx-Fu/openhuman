@@ -293,6 +293,7 @@ fn coverage_agent_definition(
         timeout_secs: None,
         sandbox_mode: SandboxMode::None,
         background: false,
+        trigger_memory_agent: Default::default(),
         subagents: vec![],
         delegate_name: delegate_name.map(str::to_string),
         agent_tier: AgentTier::Worker,
@@ -311,6 +312,7 @@ fn coverage_connected_integration(
         tools: vec![],
         gated_tools: vec![],
         connected,
+        connections: Vec::new(),
         non_active_status: None,
     }
 }

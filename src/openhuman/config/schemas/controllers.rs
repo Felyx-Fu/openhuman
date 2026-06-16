@@ -360,11 +360,16 @@ fn handle_update_model_settings(params: Map<String, Value>) -> ControllerFuture 
                         .collect::<Result<Vec<_>, String>>()
                 })
                 .transpose()?,
+            // The config-domain RPC doesn't carry a model-registry payload — the
+            // per-model vision registry is updated via the inference-domain
+            // `inference_update_model_settings` path.
+            model_registry: None,
             primary_cloud: update.primary_cloud,
             chat_provider: update.chat_provider,
             reasoning_provider: update.reasoning_provider,
             agentic_provider: update.agentic_provider,
             coding_provider: update.coding_provider,
+            vision_provider: update.vision_provider,
             memory_provider: update.memory_provider,
             embeddings_provider: update.embeddings_provider,
             heartbeat_provider: update.heartbeat_provider,
@@ -760,7 +765,7 @@ fn handle_update_voice_server_settings(params: Map<String, Value>) -> Controller
         // silently wouldn't apply until the next launch.
         match config_rpc::load_config_with_timeout().await {
             Ok(config) => {
-                log::debug!("[config][rpc] voice settings saved; applying live always-on state");
+                log::info!("[config][rpc] voice settings saved; applying live always-on state");
                 crate::openhuman::voice::always_on::start_if_enabled(&config).await;
             }
             Err(error) => {

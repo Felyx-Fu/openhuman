@@ -18,6 +18,7 @@ import {
   loadAISettings,
   loadLocalProviderSnapshot,
   localProvider,
+  modelRegistryVision,
   OPENAI_CODEX_OAUTH_MISSING_AUTH_URL,
   OPENAI_CODEX_OAUTH_MISSING_CALLBACK_URL,
   parseProviderString,
@@ -28,6 +29,7 @@ import {
   setLocalRuntimeEnabled,
   startOpenAiCodexOAuth,
   testProviderModel,
+  upsertModelRegistryVision,
 } from '../aiSettingsApi';
 
 // ─── Mock declarations (must be hoisted before imports) ───────────────────────
@@ -83,6 +85,7 @@ function makeClientConfigResult(overrides: Record<string, unknown> = {}) {
       api_key_set: false,
       model_routes: [],
       cloud_providers: [],
+      model_registry: [],
       primary_cloud: null,
       reasoning_provider: null,
       agentic_provider: null,
@@ -581,12 +584,14 @@ describe('saveAISettings', () => {
         reasoning: { kind: 'cloud', providerSlug: 'openai', model: 'gpt-4o' },
         agentic: { kind: 'openhuman' },
         coding: { kind: 'openhuman' },
+        vision: { kind: 'openhuman' },
         memory: { kind: 'openhuman' },
 
         heartbeat: { kind: 'openhuman' },
         learning: { kind: 'openhuman' },
         subconscious: { kind: 'openhuman' },
       },
+      modelRegistry: [],
       ...overrides,
     };
   }
@@ -667,14 +672,20 @@ describe('saveAISettings', () => {
         reasoning: { kind: 'openhuman' },
         agentic: { kind: 'openhuman' },
         coding: { kind: 'openhuman' },
+        vision: { kind: 'openhuman' },
         memory: { kind: 'openhuman' },
 
         heartbeat: { kind: 'openhuman' },
         learning: { kind: 'openhuman' },
         subconscious: { kind: 'openhuman' },
       },
+      modelRegistry: [],
     };
-    const next: AISettings = { cloudProviders: [anthropicProvider], routing: { ...prev.routing } };
+    const next: AISettings = {
+      cloudProviders: [anthropicProvider],
+      routing: { ...prev.routing },
+      modelRegistry: [],
+    };
 
     await saveAISettings(prev, next);
 
@@ -688,6 +699,7 @@ describe('saveAISettings', () => {
       routing: {
         ...makeSettings().routing,
         coding: { kind: 'cloud', providerSlug: 'openai', model: 'gpt-4o-mini' },
+        vision: { kind: 'cloud', providerSlug: 'openai', model: 'gpt-4o-mini' },
       },
     });
 
@@ -696,6 +708,37 @@ describe('saveAISettings', () => {
     const patch = mockOpenhumanUpdateModelSettings.mock.calls[0][0];
     expect(patch.cloud_providers).toBeDefined();
     expect(patch.coding_provider).toBe('openai:gpt-4o-mini');
+    expect(patch.vision_provider).toBe('openai:gpt-4o-mini');
+  });
+
+  it('sends model_registry when the vision flag changes', async () => {
+    const prev = makeSettings({ modelRegistry: [] });
+    const next = makeSettings({
+      modelRegistry: [{ id: 'my-llava', provider: 'openai', cost_per_1m_output: 0, vision: true }],
+    });
+    await saveAISettings(prev, next);
+    const patch = mockOpenhumanUpdateModelSettings.mock.calls[0][0];
+    expect(patch.model_registry).toEqual([
+      { id: 'my-llava', provider: 'openai', cost_per_1m_output: 0, vision: true },
+    ]);
+  });
+
+  it('omits model_registry when unchanged', async () => {
+    const registry = [{ id: 'my-llava', provider: 'openai', cost_per_1m_output: 0, vision: true }];
+    const prev = makeSettings({ modelRegistry: registry });
+    const next = makeSettings({
+      modelRegistry: [...registry],
+      routing: {
+        ...makeSettings().routing,
+        coding: { kind: 'cloud', providerSlug: 'openai', model: 'gpt-4o-mini' },
+        vision: { kind: 'cloud', providerSlug: 'openai', model: 'gpt-4o-mini' },
+      },
+    });
+    await saveAISettings(prev, next);
+    const patch = mockOpenhumanUpdateModelSettings.mock.calls[0][0];
+    expect(patch.model_registry).toBeUndefined();
+    expect(patch.coding_provider).toBe('openai:gpt-4o-mini');
+    expect(patch.vision_provider).toBe('openai:gpt-4o-mini');
   });
 });
 
@@ -916,5 +959,34 @@ describe('flushCloudProviders', () => {
     mockIsTauri.mockReturnValue(false);
     await flushCloudProviders([]);
     expect(mockOpenhumanUpdateModelSettings).not.toHaveBeenCalled();
+  });
+});
+
+describe('model registry vision helpers', () => {
+  const reg = [
+    { id: 'gpt-4o', provider: 'openai', cost_per_1m_output: 0, vision: true },
+    { id: 'text-only', provider: 'openai', cost_per_1m_output: 0, vision: false },
+  ];
+
+  it('modelRegistryVision matches by (provider, id)', () => {
+    expect(modelRegistryVision(reg, 'openai', 'gpt-4o')).toBe(true);
+    expect(modelRegistryVision(reg, 'openai', 'text-only')).toBe(false);
+    expect(modelRegistryVision(reg, 'openai', 'unlisted')).toBe(false);
+    expect(modelRegistryVision(reg, 'azure', 'gpt-4o')).toBe(false);
+  });
+
+  it('upsertModelRegistryVision adds, flips, and removes entries', () => {
+    const added = upsertModelRegistryVision([], 'openai', 'my-llava', true);
+    expect(added).toEqual([
+      { id: 'my-llava', provider: 'openai', cost_per_1m_output: 0, vision: true },
+    ]);
+    // vision:false removes the entry (absence ⇒ no vision).
+    const removed = upsertModelRegistryVision(reg, 'openai', 'gpt-4o', false);
+    expect(removed.find(e => e.id === 'gpt-4o')).toBeUndefined();
+    expect(removed.find(e => e.id === 'text-only')).toBeDefined();
+    // Flipping an existing entry on stays idempotent on the key.
+    const flipped = upsertModelRegistryVision(reg, 'openai', 'text-only', true);
+    expect(flipped.filter(e => e.id === 'text-only')).toHaveLength(1);
+    expect(modelRegistryVision(flipped, 'openai', 'text-only')).toBe(true);
   });
 });

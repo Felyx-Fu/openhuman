@@ -4,7 +4,7 @@
 //! as appropriate). External code only sees the public API on
 //! [`super::OpenAiCompatibleProvider`].
 
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 
 // ── Request bodies ────────────────────────────────────────────────────────────
 
@@ -194,6 +194,13 @@ pub(crate) struct NativeChatRequest {
     /// don't accept it are unaffected.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) frequency_penalty: Option<f64>,
+    /// OpenAI-compatible `max_tokens` — upper bound on output tokens.
+    /// Set by callers whose output is bounded (memory extraction) so
+    /// credit-metered providers don't price the request against the full
+    /// model output window during their balance pre-flight (TAURI-RUST-C62).
+    /// Skipped when `None` so open-ended generations are unaffected.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) max_tokens: Option<u32>,
 }
 
 /// Ollama-specific request options passed in the `options` field.
@@ -240,6 +247,12 @@ pub(crate) struct ResponsesRequest {
     pub(crate) stream: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) store: Option<bool>,
+    /// Responses-API output-token cap (`max_output_tokens`). Carries the
+    /// caller's `ChatRequest::max_tokens` through the Responses path so a
+    /// capped request isn't silently uncapped when `responses_api_primary`
+    /// is enabled (TAURI-RUST-C62). Skipped when `None`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) max_output_tokens: Option<u32>,
 }
 
 #[derive(Debug, Serialize)]
@@ -316,23 +329,56 @@ pub(crate) struct OpenHumanBilling {
     pub(crate) charged_amount_usd: f64,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Serialize)]
 pub(crate) struct ResponseMessage {
-    #[serde(default)]
     pub(crate) content: Option<String>,
     /// Reasoning/thinking models may return their chain-of-thought in a
     /// dedicated field instead of (or alongside) `content`. DeepSeek, Qwen3 and
     /// GLM-4 name it `reasoning_content`; OpenRouter and vLLM/SGLang-backed
-    /// OpenAI-compatible proxies emit it as `reasoning`. Accept both so the CoT
-    /// is captured regardless of the (third-party) provider's field name — it
+    /// OpenAI-compatible proxies emit it as `reasoning`. Both names fold into
+    /// this single field (see the manual `Deserialize` impl below) — the CoT
     /// must be echoed back verbatim on tool-call turns or thinking models reject
     /// the follow-up request with HTTP 400.
-    #[serde(default, alias = "reasoning")]
     pub(crate) reasoning_content: Option<String>,
-    #[serde(default)]
     pub(crate) tool_calls: Option<Vec<ToolCall>>,
-    #[serde(default)]
     pub(crate) function_call: Option<Function>,
+}
+
+// Manual `Deserialize` so that `reasoning` and `reasoning_content` are accepted
+// as DISTINCT wire keys and then folded into the single canonical field.
+//
+// A serde `alias` maps both names onto one field slot, which makes a provider
+// that emits BOTH keys in the same object (some OpenRouter / vLLM-SGLang
+// proxies do) fail with `duplicate field \`reasoning_content\``, dropping the
+// entire response. Deserializing them as separate optional fields tolerates
+// any combination; the canonical `reasoning_content` wins when both are present.
+impl<'de> Deserialize<'de> for ResponseMessage {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        struct Shadow {
+            #[serde(default)]
+            content: Option<String>,
+            #[serde(default)]
+            reasoning_content: Option<String>,
+            #[serde(default)]
+            reasoning: Option<String>,
+            #[serde(default)]
+            tool_calls: Option<Vec<ToolCall>>,
+            #[serde(default)]
+            function_call: Option<Function>,
+        }
+
+        let shadow = Shadow::deserialize(deserializer)?;
+        Ok(ResponseMessage {
+            content: shadow.content,
+            reasoning_content: shadow.reasoning_content.or(shadow.reasoning),
+            tool_calls: shadow.tool_calls,
+            function_call: shadow.function_call,
+        })
+    }
 }
 
 impl ResponseMessage {
@@ -378,6 +424,20 @@ pub(crate) struct ToolCall {
     #[serde(rename = "type")]
     pub(crate) kind: Option<String>,
     pub(crate) function: Option<Function>,
+    /// Provider-specific passthrough metadata attached to a tool call.
+    ///
+    /// Google's Gemini OpenAI-compat endpoint returns a cryptographically
+    /// signed reasoning token here as
+    /// `extra_content.google.thought_signature`, and **requires** it echoed
+    /// back verbatim on the assistant tool-call turn of every subsequent
+    /// request — otherwise it 400s with "Function call is missing a
+    /// thought_signature" (TAURI-RUST-4PK). Captured on the response and
+    /// re-emitted on the request as an opaque value so any future
+    /// `extra_content.*` keys round-trip unchanged. `skip_serializing_if`
+    /// keeps the wire body byte-identical for every provider that doesn't
+    /// send it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) extra_content: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -426,20 +486,48 @@ pub(crate) struct StreamChoice {
     pub(crate) finish_reason: Option<String>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug)]
 pub(crate) struct StreamDelta {
-    #[serde(default)]
     pub(crate) content: Option<String>,
     /// Reasoning/thinking models may stream their chain-of-thought via
     /// `reasoning_content` (DeepSeek/Qwen3/GLM-4) or `reasoning`
-    /// (OpenRouter, vLLM/SGLang proxies). Accept both delta field names.
-    #[serde(default, alias = "reasoning")]
+    /// (OpenRouter, vLLM/SGLang proxies). Both delta field names fold into
+    /// this single field (see the manual `Deserialize` impl below).
     pub(crate) reasoning_content: Option<String>,
     /// Native tool-call chunks. Each entry is keyed by `index`; the first
     /// chunk for a given index carries `id`/`type`/`function.name`, later
     /// chunks only carry fragments of `function.arguments`.
-    #[serde(default)]
     pub(crate) tool_calls: Option<Vec<StreamToolCallDelta>>,
+}
+
+// Manual `Deserialize` for the same reason as `ResponseMessage`: a streaming
+// delta that carries both `reasoning` and `reasoning_content` must not fail
+// with `duplicate field`. They deserialize as distinct keys and fold into the
+// canonical `reasoning_content` (canonical wins when both are present).
+impl<'de> Deserialize<'de> for StreamDelta {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        struct Shadow {
+            #[serde(default)]
+            content: Option<String>,
+            #[serde(default)]
+            reasoning_content: Option<String>,
+            #[serde(default)]
+            reasoning: Option<String>,
+            #[serde(default)]
+            tool_calls: Option<Vec<StreamToolCallDelta>>,
+        }
+
+        let shadow = Shadow::deserialize(deserializer)?;
+        Ok(StreamDelta {
+            content: shadow.content,
+            reasoning_content: shadow.reasoning_content.or(shadow.reasoning),
+            tool_calls: shadow.tool_calls,
+        })
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -456,6 +544,12 @@ pub(crate) struct StreamToolCallDelta {
     pub(crate) kind: Option<String>,
     #[serde(default)]
     pub(crate) function: Option<StreamToolCallFunction>,
+    /// Provider passthrough metadata (Gemini's `extra_content`, carrying
+    /// `google.thought_signature`). Arrives on the first chunk for a given
+    /// tool-call index; accumulated and re-emitted so the signature survives
+    /// the streaming path (TAURI-RUST-4PK).
+    #[serde(default)]
+    pub(crate) extra_content: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -484,4 +578,8 @@ pub(crate) struct StreamingToolCall {
     pub(crate) arguments: String,
     pub(crate) emitted_start: bool,
     pub(crate) emitted_chars: usize,
+    /// First non-null `extra_content` seen for this tool-call index (Gemini's
+    /// thought_signature). Re-emitted on the aggregated [`ToolCall`] so it can
+    /// be echoed on the next turn (TAURI-RUST-4PK).
+    pub(crate) extra_content: Option<serde_json::Value>,
 }

@@ -19,6 +19,19 @@ pub(crate) struct SessionCacheFingerprint {
     pub(super) target_agent_id: String,
     pub(super) provider_binding: String,
     pub(super) autonomy_signature: String,
+    /// Signature of `config.model_registry`. The cached `Agent` stores a
+    /// build-time `model_vision` bool; toggling a model's "Supports vision" flag
+    /// keeps the same model id (so neither `model_override` nor `provider_binding`
+    /// change) — without this the stale session would be reused. Mirrors
+    /// [`Self::autonomy_signature`].
+    pub(super) model_registry_signature: String,
+    /// Serialized signature of the active agent profile. The cached `Agent`
+    /// bakes in the profile's tool/skill/MCP/connector visibility and SOUL/MEMORY
+    /// overrides at build time; switching profiles on the same thread keeps the
+    /// same model/agent/provider, so without this the previous profile's
+    /// capability surface would leak into the new profile's turns. Any change to
+    /// the resolved profile forces a rebuild.
+    pub(super) profile_signature: String,
 }
 
 pub(super) struct SessionEntry {
@@ -31,6 +44,24 @@ pub(super) struct InFlightEntry {
     pub(super) request_id: String,
     pub(super) handle: tokio::task::JoinHandle<()>,
     pub(super) run_queue: std::sync::Arc<crate::openhuman::agent::harness::run_queue::RunQueue>,
+    /// Cooperative cancellation for this turn. Cancelling it makes the turn's
+    /// `tokio::select!` arm fire and drops the in-flight turn future (which
+    /// cancels the in-flight LLM request and releases locks at a safe await
+    /// point) — a graceful alternative to the abrupt `handle.abort()`. The
+    /// handle is retained only as a hard backstop if cooperative cancellation
+    /// does not land within a grace period.
+    pub(super) cancel_token: tokio_util::sync::CancellationToken,
+}
+
+/// A concurrent, forked (`QueueMode::Parallel`) turn on a thread. Tracked in a
+/// separate lane keyed by `request_id` so any number can run alongside the
+/// primary in-flight turn without participating in interrupt/steer/queue
+/// semantics. Carries `thread_id` so cancellation-by-thread can find it.
+#[derive(Debug)]
+pub(super) struct ParallelEntry {
+    pub(super) thread_id: String,
+    pub(super) handle: tokio::task::JoinHandle<()>,
+    pub(super) cancel_token: tokio_util::sync::CancellationToken,
 }
 
 #[derive(Debug, Clone)]
@@ -47,6 +78,23 @@ pub struct ChatRequestMetadata {
     pub speak_reply: Option<bool>,
     pub source: Option<String>,
     pub session_id: Option<u64>,
+}
+
+impl ChatRequestMetadata {
+    /// Constructor for messages submitted via the AgentBox `/run` HTTP surface
+    /// (`OPENHUMAN_AGENTBOX_MODE=1`). These are background invocations driven
+    /// programmatically by a remote marketplace caller — no live UI is
+    /// attached to surface TTS or PTT signals — so `speak_reply` and
+    /// `session_id` stay `None` and the `source` tag identifies the origin
+    /// for analytics / log filtering downstream (mirrors the `"ptt"` /
+    /// `"dictation"` / `"type"` convention used by the desktop UI).
+    pub fn agentbox() -> Self {
+        Self {
+            speak_reply: None,
+            source: Some("agentbox".to_string()),
+            session_id: None,
+        }
+    }
 }
 
 #[derive(Debug, Deserialize)]

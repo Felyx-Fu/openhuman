@@ -154,10 +154,9 @@ test.describe('Harness - Cron prompt-flow', () => {
   test('listing scheduled tasks returns the forced response', async ({ page }) => {
     const CANARY = 'canary-cron-list-c3d4';
     await setMockBehavior(
-      'llmKeywordRules',
+      'llmForcedResponses',
       JSON.stringify([
         {
-          keyword: 'scheduled tasks',
           content: `You have 2 scheduled tasks: daily_standup (weekdays 9am) and weekly_review (Fridays 10am). ${CANARY}`,
         },
       ])

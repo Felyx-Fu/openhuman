@@ -56,6 +56,14 @@ pub fn render_safety() -> String {
         .expect("SafetySection::build is infallible")
 }
 
+/// Render the canonical grounding / anti-hallucination contract
+/// ([`GROUNDING_BODY`]). Dynamic `agents/<id>/prompt.rs` builders call this
+/// so they inherit the exact same anti-fabrication floor as the static
+/// section chain — single source of truth, no drift.
+pub fn render_grounding() -> &'static str {
+    GROUNDING_BODY
+}
+
 // `render_skills` and `render_connected_integrations` helpers are
 // gone — `## Available Skills` lives in `integrations_agent/prompt.rs`, and
 // the connected-integrations / delegation-guide blocks each live in
@@ -378,6 +386,13 @@ pub fn render_subagent_system_prompt_with_format(
         );
     }
 
+    // 3b'. Grounding / anti-hallucination contract. Always emitted (like the
+    //      static chain): every spawned sub-agent gets the same floor.
+    //      Sourced from the shared `GROUNDING_BODY` const so this narrow
+    //      renderer can never drift from `GroundingSection`.
+    out.push_str(GROUNDING_BODY);
+    out.push_str("\n\n");
+
     // 3c/3d. `## Available Skills` and `## Connected Integrations`
     //        are no longer emitted here. Each agent that needs them
     //        renders its own block in its `prompt.rs` (integrations_agent
@@ -640,7 +655,7 @@ pub fn default_workspace_file_content(filename: &str) -> &'static str {
 /// manufacture a full context when they only need the static text.
 fn empty_prompt_context_for_static_sections() -> PromptContext<'static> {
     static EMPTY_TOOLS: &[PromptTool<'static>] = &[];
-    static EMPTY_SKILLS: &[crate::openhuman::workflows::Workflow] = &[];
+    static EMPTY_WORKFLOWS: &[crate::openhuman::workflows::Workflow] = &[];
     static EMPTY_INTEGRATIONS: &[ConnectedIntegration] = &[];
     // SAFETY: the &HashSet reference must outlive the returned context;
     // a leaked OnceLock-style allocation gives us a permanent 'static
@@ -652,7 +667,7 @@ fn empty_prompt_context_for_static_sections() -> PromptContext<'static> {
         model_name: "",
         agent_id: "",
         tools: EMPTY_TOOLS,
-        skills: EMPTY_SKILLS,
+        workflows: EMPTY_WORKFLOWS,
         dispatcher_instructions: "",
         learned: LearnedContextData::default(),
         visible_tool_names: visible,

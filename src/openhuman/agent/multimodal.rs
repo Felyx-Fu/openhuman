@@ -3,9 +3,13 @@ use crate::openhuman::config::{
 };
 use crate::openhuman::inference::provider::ChatMessage;
 use base64::{engine::general_purpose::STANDARD, Engine as _};
+use flate2::read::GzDecoder;
 use reqwest::Client;
 use sha2::{Digest, Sha256};
-use std::path::Path;
+use std::collections::HashMap;
+use std::io::Read;
+use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
 use std::time::Duration;
 
 const IMAGE_MARKER_PREFIX: &str = "[IMAGE:";
@@ -19,10 +23,9 @@ const ALLOWED_IMAGE_MIME_TYPES: &[&str] = &[
 
 /// File-attachment marker prefix. Counterpart to [`IMAGE_MARKER_PREFIX`].
 /// Resolution rules mirror images: local paths, optional http(s) URLs
-/// gated by [`MultimodalFileConfig::allow_remote_fetch`]. `data:` URIs
-/// are intentionally rejected — the file pipeline does not inline
-/// base64 the way images do; users wanting inline content should paste
-/// it as text.
+/// gated by [`MultimodalFileConfig::allow_remote_fetch`], and renderer-owned
+/// `data:` URIs. Inline `application/gzip` data URIs are decompressed before
+/// validation when they carry an `original_mime=...` parameter.
 const FILE_MARKER_PREFIX: &str = "[FILE:";
 
 /// Hard upper bound on how long [`pdf_extract::extract_text_from_mem`]
@@ -375,6 +378,443 @@ pub async fn prepare_messages_for_provider(
     })
 }
 
+/// Ingress-time file extraction (PDF-attach fix).
+///
+/// Replaces every `[FILE:data:…]` marker in a raw user message with its
+/// extracted-text block (`[FILE-EXTRACTED: name="…"]…text…[/FILE-EXTRACTED]`),
+/// or a content-less `[FILE-ATTACHED: …]` placeholder when extraction fails.
+/// `[IMAGE:…]` markers are deliberately left untouched here — they are handled
+/// at provider dispatch (vision needs the inline data URI).
+///
+/// Run this at channel ingress, BEFORE the message is persisted to history,
+/// auto-saved to the memory store, appended to the cross-thread JSONL, or
+/// scanned for prompt injection — so the multi-MB base64 data URI never
+/// survives past the front door. Idempotent: a message with no `[FILE:` marker
+/// (already-rewritten `[FILE-EXTRACTED]` text included) is returned unchanged.
+pub async fn inline_file_attachments(message: &str, file_config: &MultimodalFileConfig) -> String {
+    if !message.contains(FILE_MARKER_PREFIX) {
+        return message.to_string();
+    }
+    let (cleaned, file_refs) = parse_file_markers(message);
+    if file_refs.is_empty() {
+        return message.to_string();
+    }
+    let (max_files, max_file_size_mb, max_extracted_text_chars) = file_config.effective_limits();
+    let max_file_bytes = max_file_size_mb.saturating_mul(1024 * 1024);
+    // Enforce the per-turn file cap at ingress (rewriting the markers removes
+    // the count check that `prepare_messages_for_provider` would otherwise do).
+    // `max_files == 0` is the hard-disable sentinel: read nothing. Over-cap refs
+    // degrade to a content-less placeholder rather than being normalized/read.
+    let read_cap = if file_config.max_files == 0 {
+        0
+    } else {
+        max_files
+    };
+    let client = build_runtime_proxy_client_with_timeouts("provider.ollama", 30, 10);
+
+    let mut payloads = Vec::with_capacity(file_refs.len());
+    for (idx, reference) in file_refs.iter().enumerate() {
+        if idx >= read_cap {
+            payloads.push(FilePayload::Reference {
+                name: "attachment (over file limit)".to_string(),
+                mime: "application/octet-stream".to_string(),
+                size_bytes: 0,
+                sha256_prefix: "skipped".to_string(),
+            });
+            continue;
+        }
+        match normalize_file_reference(
+            reference,
+            file_config,
+            max_file_bytes,
+            max_extracted_text_chars,
+            &client,
+        )
+        .await
+        {
+            Ok(payload) => payloads.push(payload),
+            Err(err) => {
+                tracing::warn!(
+                    target: "multimodal",
+                    reason = %err,
+                    "[multimodal::files][ingress] file marker could not be normalized; emitting bare placeholder"
+                );
+                payloads.push(FilePayload::Reference {
+                    name: "attachment".to_string(),
+                    mime: "application/octet-stream".to_string(),
+                    size_bytes: 0,
+                    sha256_prefix: "unavailable".to_string(),
+                });
+            }
+        }
+    }
+
+    let rewritten = compose_multimodal_message(&cleaned, &[], &payloads);
+    tracing::info!(
+        target: "multimodal",
+        files = payloads.len(),
+        before_chars = message.chars().count(),
+        after_chars = rewritten.chars().count(),
+        "[multimodal::files][ingress] inlined file attachments — data URI replaced with extracted text/placeholder before persistence"
+    );
+    rewritten
+}
+
+// ── Image sidecar (disk-backed) ───────────────────────────────────────────
+//
+// Persisted messages must never carry a raw `[IMAGE:data:…]` data URI: like the
+// PDF blob it floods the injection scan, the memory auto-save (N-chunk embed →
+// Voyage 400), and the cross-thread JSONL index. So at ingress we replace each
+// image marker with a compact `[Image: image #att:<id>]` placeholder and write
+// the decoded image bytes out-of-band to `<workspace>/attachments/<id>.<ext>`.
+// At provider dispatch we rehydrate the placeholder back into an inline
+// `[IMAGE:<path>]` marker — but ONLY for vision-capable models; non-vision
+// models keep the text placeholder (no multi-MB payload, no error).
+//
+// Disk-backed (not the old in-memory FIFO) so attachments survive process
+// restarts and long delegation chains: a sub-agent spawned several hops after
+// ingress still resolves the image by id. `normalize_local_image` re-reads the
+// file at dispatch, so no decode/MIME logic is duplicated here.
+
+/// Placeholder token left in the persisted message in place of a raw image data
+/// URI. Mixed-case so it never collides with the inline `[IMAGE:` parser.
+const IMAGE_PLACEHOLDER_PREFIX: &str = "[Image:";
+/// Separator before the stash content-hash id inside a placeholder.
+const IMAGE_STASH_REF: &str = "#att:";
+
+/// Soft cap on the on-disk attachments directory. After each write, oldest
+/// files (by mtime) are evicted until the total is back under this bound.
+const ATTACHMENTS_MAX_BYTES: u64 = 256 * 1024 * 1024;
+/// Age after which an attachment is considered stale and removed by the
+/// startup sweep ([`sweep_stale_attachments`]).
+const ATTACHMENTS_TTL: Duration = Duration::from_secs(24 * 60 * 60);
+
+/// Process-global on-disk attachments directory. Installed once at core startup
+/// via [`init_attachments_dir`]; mirrors the `OnceLock` pattern the in-memory
+/// stash used before.
+static ATTACHMENTS_DIR: OnceLock<PathBuf> = OnceLock::new();
+
+/// Install the on-disk attachments directory (`<workspace>/attachments`). Call
+/// once at core startup. Idempotent — first writer wins. Best-effort fires a
+/// stale-file sweep when called inside a Tokio runtime.
+pub fn init_attachments_dir(dir: PathBuf) {
+    if ATTACHMENTS_DIR.set(dir).is_err() {
+        return;
+    }
+    if let Ok(handle) = tokio::runtime::Handle::try_current() {
+        handle.spawn(async {
+            sweep_stale_attachments().await;
+        });
+    }
+}
+
+/// Resolve the attachments dir, falling back to a **per-user private** dir when
+/// unset (CLI / direct invocation / tests that never called
+/// [`init_attachments_dir`]). The persistence-pollution fix and rehydration both
+/// hold either way.
+fn attachments_dir() -> PathBuf {
+    ATTACHMENTS_DIR
+        .get()
+        .cloned()
+        .unwrap_or_else(fallback_attachments_dir)
+}
+
+/// Per-user fallback attachments dir used only when [`init_attachments_dir`] was
+/// never called. Uses the OS user cache dir (e.g. `~/Library/Caches/...`,
+/// `~/.cache/...`) so persisted image bytes aren't dropped into a world-readable
+/// shared `temp_dir()` on multi-user hosts. Only falls back to `temp_dir()` when
+/// no user cache dir can be resolved at all.
+fn fallback_attachments_dir() -> PathBuf {
+    directories::BaseDirs::new()
+        .map(|d| d.cache_dir().join("openhuman-attachments"))
+        .unwrap_or_else(|| std::env::temp_dir().join("openhuman-attachments"))
+}
+
+/// Persist a canonical image data URI to `<dir>/<id>.<ext>`, content-addressed
+/// by `id`. Atomic (temp file + rename); deduped (skips the write when the
+/// target already exists). Returns the written path. After writing, enforces
+/// [`ATTACHMENTS_MAX_BYTES`].
+async fn write_attachment(id: &str, data_uri: &str) -> anyhow::Result<PathBuf> {
+    let parsed = parse_data_uri(data_uri)
+        .map_err(|reason| anyhow::anyhow!("cannot decode stashed data URI: {reason}"))?;
+    let ext = ext_from_mime(&parsed.mime).unwrap_or("img");
+    let dir = attachments_dir();
+    tokio::fs::create_dir_all(&dir).await?;
+    let final_path = dir.join(format!("{id}.{ext}"));
+    if tokio::fs::try_exists(&final_path).await.unwrap_or(false) {
+        return Ok(final_path); // content-addressed: already persisted
+    }
+    let tmp_path = dir.join(format!(".{id}.{ext}.tmp"));
+    tokio::fs::write(&tmp_path, &parsed.bytes).await?;
+    tokio::fs::rename(&tmp_path, &final_path).await?;
+    enforce_attachments_cap(&dir).await;
+    Ok(final_path)
+}
+
+/// File extension for a known image MIME (inverse of [`mime_from_extension`]).
+fn ext_from_mime(mime: &str) -> Option<&'static str> {
+    match mime {
+        "image/png" => Some("png"),
+        "image/jpeg" => Some("jpg"),
+        "image/webp" => Some("webp"),
+        "image/gif" => Some("gif"),
+        "image/bmp" => Some("bmp"),
+        _ => None,
+    }
+}
+
+/// Build an `id → path` index from a single read of the attachments dir. Skips
+/// in-flight `.tmp` files. Sync (called from the sync rehydrate path).
+fn build_attachment_index() -> HashMap<String, PathBuf> {
+    let dir = attachments_dir();
+    let mut map = HashMap::new();
+    let Ok(entries) = std::fs::read_dir(&dir) else {
+        return map;
+    };
+    for entry in entries.flatten() {
+        let name = entry.file_name();
+        let name = name.to_string_lossy();
+        if name.starts_with('.') {
+            continue; // skip `.<id>.<ext>.tmp` in-flight writes
+        }
+        if let Some(stem) = name.split('.').next() {
+            if !stem.is_empty() {
+                map.insert(stem.to_string(), entry.path());
+            }
+        }
+    }
+    map
+}
+
+/// Evict oldest attachments (by mtime) until the dir is under
+/// [`ATTACHMENTS_MAX_BYTES`]. Best-effort; replaces the old heap FIFO.
+async fn enforce_attachments_cap(dir: &Path) {
+    let mut files: Vec<(PathBuf, std::time::SystemTime, u64)> = Vec::new();
+    let mut total: u64 = 0;
+    let Ok(mut rd) = tokio::fs::read_dir(dir).await else {
+        return;
+    };
+    while let Ok(Some(entry)) = rd.next_entry().await {
+        // Skip in-flight `.<id>.<ext>.tmp` writes (mirrors build_attachment_index)
+        // so concurrent atomic writes aren't evicted out from under a rename.
+        if entry.file_name().to_string_lossy().starts_with('.') {
+            continue;
+        }
+        if let Ok(meta) = entry.metadata().await {
+            if meta.is_file() {
+                let mtime = meta.modified().unwrap_or(std::time::UNIX_EPOCH);
+                total = total.saturating_add(meta.len());
+                files.push((entry.path(), mtime, meta.len()));
+            }
+        }
+    }
+    if total <= ATTACHMENTS_MAX_BYTES {
+        return;
+    }
+    files.sort_by_key(|(_, mtime, _)| *mtime); // oldest first
+    for (path, _, len) in files {
+        if total <= ATTACHMENTS_MAX_BYTES {
+            break;
+        }
+        if tokio::fs::remove_file(&path).await.is_ok() {
+            total = total.saturating_sub(len);
+            tracing::debug!(
+                target: "multimodal",
+                path = %path.display(),
+                "[multimodal::images][gc] evicted attachment over size cap"
+            );
+        }
+    }
+}
+
+/// Delete attachments older than [`ATTACHMENTS_TTL`]. Best-effort startup sweep
+/// fired by [`init_attachments_dir`].
+pub async fn sweep_stale_attachments() {
+    let dir = attachments_dir();
+    let Ok(mut rd) = tokio::fs::read_dir(&dir).await else {
+        return;
+    };
+    let now = std::time::SystemTime::now();
+    let mut reclaimed = 0u64;
+    while let Ok(Some(entry)) = rd.next_entry().await {
+        let Ok(meta) = entry.metadata().await else {
+            continue;
+        };
+        if !meta.is_file() {
+            continue;
+        }
+        let mtime = meta.modified().unwrap_or(std::time::UNIX_EPOCH);
+        let age = now.duration_since(mtime).unwrap_or(Duration::ZERO);
+        if age > ATTACHMENTS_TTL && tokio::fs::remove_file(entry.path()).await.is_ok() {
+            reclaimed = reclaimed.saturating_add(meta.len());
+        }
+    }
+    if reclaimed > 0 {
+        tracing::info!(
+            target: "multimodal",
+            reclaimed_bytes = reclaimed,
+            "[multimodal::images][gc] startup sweep removed stale attachments"
+        );
+    }
+}
+
+/// Ingress-time image stashing. Replaces every `[IMAGE:data:…]` marker with a
+/// `[Image: image #att:<id>]` placeholder and stashes the decoded canonical data
+/// URI, so the multi-MB base64 never persists. Idempotent (no `[IMAGE:` ⇒ no-op).
+pub async fn stash_image_attachments(message: &str, image_config: &MultimodalConfig) -> String {
+    if !message.contains(IMAGE_MARKER_PREFIX) {
+        return message.to_string();
+    }
+    let (cleaned, image_refs) = parse_image_markers(message);
+    if image_refs.is_empty() {
+        return message.to_string();
+    }
+    let (max_images, max_image_size_mb) = image_config.effective_limits();
+    let max_image_bytes = max_image_size_mb.saturating_mul(1024 * 1024);
+    let client = build_runtime_proxy_client_with_timeouts("provider.ollama", 30, 10);
+
+    let mut placeholders = Vec::with_capacity(image_refs.len());
+    for (idx, reference) in image_refs.iter().enumerate() {
+        // Enforce the per-turn image cap at ingress: over-cap markers degrade to
+        // a text placeholder and are never normalized/read or stashed (rewriting
+        // the markers removes the count check `prepare_messages_for_provider`
+        // would otherwise apply, and bounds stash growth per message).
+        if idx >= max_images {
+            placeholders.push("[Image: (over image limit)]".to_string());
+            continue;
+        }
+        match normalize_image_reference(reference, image_config, max_image_bytes, &client).await {
+            Ok(data_uri) => {
+                let id = sha256_prefix(data_uri.as_bytes());
+                match write_attachment(&id, &data_uri).await {
+                    Ok(path) => tracing::debug!(
+                        target: "multimodal",
+                        id = %id,
+                        path = %path.display(),
+                        "[multimodal::images][stash] persisted attachment to disk"
+                    ),
+                    Err(err) => tracing::warn!(
+                        target: "multimodal",
+                        id = %id,
+                        reason = %err,
+                        "[multimodal::images][stash] failed to persist attachment; placeholder will not rehydrate"
+                    ),
+                }
+                placeholders.push(format!("[Image: image {IMAGE_STASH_REF}{id}]"));
+            }
+            Err(err) => {
+                tracing::warn!(
+                    target: "multimodal",
+                    reason = %err,
+                    "[multimodal::images][ingress] image could not be normalized; emitting bare placeholder"
+                );
+                placeholders.push("[Image: (could not be processed)]".to_string());
+            }
+        }
+    }
+
+    let mut out = cleaned.trim().to_string();
+    for p in &placeholders {
+        if !out.is_empty() {
+            out.push('\n');
+        }
+        out.push_str(p);
+    }
+    tracing::info!(
+        target: "multimodal",
+        images = placeholders.len(),
+        before_chars = message.chars().count(),
+        after_chars = out.chars().count(),
+        "[multimodal::images][ingress] stashed image attachments — data URI replaced with placeholder before persistence"
+    );
+    out
+}
+
+/// Extract the `[Image: … #att:<id>]` sidecar placeholder tokens from `text`,
+/// in order. Used to forward a user's attached images into a delegated vision
+/// sub-agent's prompt so its turn rehydrates them (the orchestrator itself, on
+/// a non-vision tier, keeps the placeholder as text and never sees the image).
+pub fn extract_image_placeholders_in_text(text: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut cursor = 0;
+    while let Some(rel) = text[cursor..].find(IMAGE_PLACEHOLDER_PREFIX) {
+        let start = cursor + rel;
+        let Some(rel_end) = text[start..].find(']') else {
+            break;
+        };
+        let end = start + rel_end + 1;
+        let token = &text[start..end];
+        if token.contains(IMAGE_STASH_REF) {
+            out.push(token.to_string());
+        }
+        cursor = end;
+    }
+    out
+}
+
+/// True if any message carries an `[Image: … #att:<id>]` sidecar placeholder.
+pub fn has_image_placeholders(messages: &[ChatMessage]) -> bool {
+    messages.iter().any(|m| {
+        m.content.contains(IMAGE_PLACEHOLDER_PREFIX) && m.content.contains(IMAGE_STASH_REF)
+    })
+}
+
+/// Rehydrate `[Image: … #att:<id>]` placeholders back into inline
+/// `[IMAGE:<path>]` markers pointing at the on-disk attachment, returning a
+/// provider-only copy. `normalize_image_reference` re-reads the file at
+/// dispatch. Placeholders whose id is absent (file evicted/swept, or written by
+/// a different workspace) keep their text. Call ONLY for vision-capable models.
+pub fn rehydrate_image_placeholders(messages: &[ChatMessage]) -> Vec<ChatMessage> {
+    let index = build_attachment_index();
+    messages
+        .iter()
+        .map(|m| {
+            if !(m.content.contains(IMAGE_PLACEHOLDER_PREFIX)
+                && m.content.contains(IMAGE_STASH_REF))
+            {
+                return m.clone();
+            }
+            ChatMessage {
+                id: m.id.clone(),
+                role: m.role.clone(),
+                content: rehydrate_placeholders_in_text(&m.content, &index),
+                extra_metadata: m.extra_metadata.clone(),
+            }
+        })
+        .collect()
+}
+
+/// Replace each `[Image: <name> #att:<id>]` placeholder in `text` with
+/// `[IMAGE:<path>]` when the id resolves to an on-disk attachment in `index`;
+/// leave it verbatim otherwise.
+fn rehydrate_placeholders_in_text(text: &str, index: &HashMap<String, PathBuf>) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut cursor = 0;
+    while let Some(rel) = text[cursor..].find(IMAGE_PLACEHOLDER_PREFIX) {
+        let start = cursor + rel;
+        out.push_str(&text[cursor..start]);
+        let Some(rel_end) = text[start..].find(']') else {
+            out.push_str(&text[start..]);
+            cursor = text.len();
+            break;
+        };
+        let end = start + rel_end + 1;
+        let inner = &text[start..end];
+        let replaced = inner.find(IMAGE_STASH_REF).and_then(|ai| {
+            let id = inner[ai + IMAGE_STASH_REF.len()..]
+                .trim_end_matches(']')
+                .trim();
+            index
+                .get(id)
+                .map(|path| format!("[IMAGE:{}]", path.display()))
+        });
+        out.push_str(replaced.as_deref().unwrap_or(inner));
+        cursor = end;
+    }
+    out.push_str(&text[cursor..]);
+    out
+}
+
 fn compose_multimodal_message(
     text: &str,
     data_uris: &[String],
@@ -488,45 +928,126 @@ async fn normalize_image_reference(
 }
 
 fn normalize_data_uri(source: &str, max_bytes: usize) -> anyhow::Result<String> {
+    let parsed = parse_data_uri(source).map_err(|reason| MultimodalError::InvalidMarker {
+        input: source.to_string(),
+        reason,
+    })?;
+
+    let (mime, decoded) = if parsed.mime == "application/gzip" {
+        let original_mime = data_uri_param(&parsed.params, "original_mime").ok_or_else(|| {
+            MultimodalError::InvalidMarker {
+                input: source.to_string(),
+                reason: "compressed image data URI missing original_mime parameter".to_string(),
+            }
+        })?;
+        (
+            original_mime.to_ascii_lowercase(),
+            gunzip_data_uri(source, &parsed.bytes, max_bytes)?,
+        )
+    } else {
+        (parsed.mime, parsed.bytes)
+    };
+
+    validate_mime(source, &mime)?;
+    validate_size(source, decoded.len(), max_bytes)?;
+
+    Ok(format!("data:{mime};base64,{}", STANDARD.encode(decoded)))
+}
+
+struct ParsedDataUri {
+    mime: String,
+    params: Vec<(String, String)>,
+    bytes: Vec<u8>,
+}
+
+fn parse_data_uri(source: &str) -> Result<ParsedDataUri, String> {
     let Some(comma_idx) = source.find(',') else {
-        return Err(MultimodalError::InvalidMarker {
-            input: source.to_string(),
-            reason: "expected data URI payload".to_string(),
-        }
-        .into());
+        return Err("expected data URI payload".to_string());
     };
 
     let header = &source[..comma_idx];
     let payload = source[comma_idx + 1..].trim();
 
     if !header.contains(";base64") {
+        return Err("only base64 data URIs are supported".to_string());
+    }
+
+    let mut parts = header.trim_start_matches("data:").split(';');
+    let mime = parts.next().unwrap_or_default().trim().to_ascii_lowercase();
+    let params = parts
+        .filter_map(|part| {
+            if part.eq_ignore_ascii_case("base64") {
+                return None;
+            }
+            let (key, value) = part.split_once('=')?;
+            Some((
+                key.trim().to_ascii_lowercase(),
+                percent_decode(value.trim()).unwrap_or_else(|| value.trim().to_string()),
+            ))
+        })
+        .collect::<Vec<_>>();
+
+    let bytes = STANDARD
+        .decode(payload)
+        .map_err(|error| format!("invalid base64 payload: {error}"))?;
+
+    Ok(ParsedDataUri {
+        mime,
+        params,
+        bytes,
+    })
+}
+
+fn data_uri_param(params: &[(String, String)], key: &str) -> Option<String> {
+    params
+        .iter()
+        .find(|(candidate, _)| candidate.eq_ignore_ascii_case(key))
+        .map(|(_, value)| value.clone())
+}
+
+fn percent_decode(value: &str) -> Option<String> {
+    let bytes = value.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'%' {
+            if i + 2 >= bytes.len() {
+                return None;
+            }
+            let hex = std::str::from_utf8(&bytes[i + 1..i + 3]).ok()?;
+            let byte = u8::from_str_radix(hex, 16).ok()?;
+            out.push(byte);
+            i += 3;
+        } else {
+            out.push(bytes[i]);
+            i += 1;
+        }
+    }
+    String::from_utf8(out).ok()
+}
+
+fn gunzip_data_uri(
+    source: &str,
+    bytes: &[u8],
+    max_decompressed_bytes: usize,
+) -> anyhow::Result<Vec<u8>> {
+    let limit = max_decompressed_bytes.saturating_add(1) as u64;
+    let mut decoder = GzDecoder::new(bytes).take(limit);
+    let mut out = Vec::new();
+    decoder
+        .read_to_end(&mut out)
+        .map_err(|error| MultimodalError::InvalidMarker {
+            input: source.to_string(),
+            reason: format!("invalid gzip payload: {error}"),
+        })?;
+    if out.len() > max_decompressed_bytes {
         return Err(MultimodalError::InvalidMarker {
             input: source.to_string(),
-            reason: "only base64 data URIs are supported".to_string(),
+            reason: format!("decompressed payload exceeds {max_decompressed_bytes} bytes"),
         }
         .into());
     }
-
-    let mime = header
-        .trim_start_matches("data:")
-        .split(';')
-        .next()
-        .unwrap_or_default()
-        .trim()
-        .to_ascii_lowercase();
-
-    validate_mime(source, &mime)?;
-
-    let decoded = STANDARD
-        .decode(payload)
-        .map_err(|error| MultimodalError::InvalidMarker {
-            input: source.to_string(),
-            reason: format!("invalid base64 payload: {error}"),
-        })?;
-
-    validate_size(source, decoded.len(), max_bytes)?;
-
-    Ok(format!("data:{mime};base64,{}", STANDARD.encode(decoded)))
+    Ok(out)
 }
 
 async fn normalize_remote_image(
@@ -727,12 +1248,16 @@ async fn normalize_file_reference(
     remote_client: &Client,
 ) -> anyhow::Result<FilePayload> {
     if source.starts_with("data:") {
-        return Err(MultimodalError::InvalidFileMarker {
-            input: source.to_string(),
-            reason: "data: URIs are not supported for [FILE:…] markers — paste content as text"
-                .to_string(),
-        }
-        .into());
+        let (bytes, name, mime) = normalize_file_data_uri(source, max_bytes)?;
+        return file_payload_from_bytes(
+            source,
+            bytes,
+            name,
+            mime,
+            config,
+            max_extracted_text_chars,
+        )
+        .await;
     }
 
     let (bytes, path_hint, name, header_content_type) =
@@ -758,6 +1283,54 @@ async fn normalize_file_reference(
             supported: config.allowed_mime_types.join(", "),
         })?;
 
+    file_payload_from_bytes(source, bytes, name, mime, config, max_extracted_text_chars).await
+}
+
+fn normalize_file_data_uri(
+    source: &str,
+    max_bytes: usize,
+) -> anyhow::Result<(Vec<u8>, String, String)> {
+    let parsed = parse_data_uri(source).map_err(|reason| MultimodalError::InvalidFileMarker {
+        input: source.to_string(),
+        reason,
+    })?;
+    let name = data_uri_param(&parsed.params, "name").unwrap_or_else(|| "attachment".to_string());
+
+    let (mime, bytes) = if parsed.mime == "application/gzip" {
+        let original_mime = data_uri_param(&parsed.params, "original_mime").ok_or_else(|| {
+            MultimodalError::InvalidFileMarker {
+                input: source.to_string(),
+                reason: "compressed file data URI missing original_mime parameter".to_string(),
+            }
+        })?;
+        (
+            original_mime.to_ascii_lowercase(),
+            gunzip_data_uri(source, &parsed.bytes, max_bytes)?,
+        )
+    } else {
+        (parsed.mime, parsed.bytes)
+    };
+
+    if bytes.len() > max_bytes {
+        return Err(MultimodalError::FileTooLarge {
+            input: source.to_string(),
+            size_bytes: bytes.len(),
+            max_bytes,
+        }
+        .into());
+    }
+
+    Ok((bytes, name, mime))
+}
+
+async fn file_payload_from_bytes(
+    source: &str,
+    bytes: Vec<u8>,
+    name: String,
+    mime: String,
+    config: &MultimodalFileConfig,
+    max_extracted_text_chars: usize,
+) -> anyhow::Result<FilePayload> {
     if !config.is_mime_allowed(&mime) {
         return Err(MultimodalError::UnsupportedFileMime {
             input: source.to_string(),

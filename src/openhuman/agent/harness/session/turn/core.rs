@@ -3,8 +3,13 @@
 use super::super::transcript;
 use super::super::turn_engine_adapter::{AgentCheckpoint, AgentObserver, AgentToolSource};
 use super::super::types::Agent;
-use super::{integration_announcement_note, normalize_tool_call};
+use super::{
+    integration_announcement_note, mcp_announcement_note, newly_connected_slugs,
+    normalize_tool_call,
+};
 use crate::openhuman::agent::harness;
+use crate::openhuman::agent::harness::definition::TriggerMemoryAgent;
+use crate::openhuman::agent::harness::fork_context::ParentExecutionContext;
 use crate::openhuman::agent::hooks::{self, TurnContext};
 use crate::openhuman::agent::memory_loader::collect_recall_citations;
 use crate::openhuman::agent::progress::AgentProgress;
@@ -117,6 +122,16 @@ impl Agent {
                 .iter()
                 .map(|i| i.toolkit.clone())
                 .collect();
+            // MCP analogue: seed the announced MCP set with the servers already
+            // connected at startup. Those are already in the (turn-1) system
+            // prompt's `## Connected MCP Servers` block, so only servers that
+            // connect *mid-session* should later be announced on the user turn.
+            self.announced_mcp_servers =
+                crate::openhuman::mcp_registry::connections::connected_overview()
+                    .await
+                    .into_iter()
+                    .map(|s| s.qualified_name)
+                    .collect();
         } else {
             // Deliberately do NOT rebuild the system prompt on subsequent
             // turns. The rendered prompt is the KV-cache prefix the inference
@@ -161,6 +176,27 @@ impl Agent {
             // real change on the next turn after the UI's 5 s poll has
             // repopulated [`INTEGRATIONS_CACHE`].
 
+            // MCP mid-session connect surfacing — the analogue of the Composio
+            // path above. `use_mcp_server` is a single static delegate (no
+            // per-server schema to refresh), so the whole mechanism is: diff
+            // the live in-process connection map against what we've already
+            // announced and queue a one-shot note for any newly-connected
+            // server onto the next user message. The map is in-process (no
+            // network, unlike Composio's cache), so reading it every turn is
+            // cheap. Like the Composio block, the frozen `## Connected MCP
+            // Servers` system-prompt section stays as the turn-1 snapshot.
+            let connected_mcp: Vec<String> =
+                crate::openhuman::mcp_registry::connections::connected_overview()
+                    .await
+                    .into_iter()
+                    .map(|s| s.qualified_name)
+                    .collect();
+            for qn in newly_connected_slugs(&connected_mcp, &mut self.announced_mcp_servers) {
+                if !self.pending_mcp_announcement.contains(&qn) {
+                    self.pending_mcp_announcement.push(qn);
+                }
+            }
+
             log::trace!(
                 "[agent_loop] system prompt reused (history_len={}) — KV cache prefix preserved",
                 self.history.len()
@@ -168,16 +204,44 @@ impl Agent {
         }
 
         if self.auto_save {
-            let _ = self
-                .memory
-                .store(
-                    "",
-                    "user_msg",
-                    user_message,
-                    MemoryCategory::Conversation,
-                    None,
-                )
-                .await;
+            // Fire-and-forget: persisting the user message to the memory store
+            // does an embedding round-trip (Voyage) + memory-tree write that the
+            // in-flight turn never reads back. Awaiting it delayed the start of
+            // *every* turn before recall/LLM began, so spawn it and let the chat
+            // continue immediately.
+            //
+            // Use a UNIQUE per-message key: the old fixed `"user_msg"` key
+            // upserts a single document (`upsert_document` keys by namespace+key),
+            // so concurrent turns would race on — and overwrite — one shared slot.
+            // A unique key makes each user message its own conversation document,
+            // which both removes the race and stops the autosave from only ever
+            // retaining the latest message.
+            let memory = self.memory.clone();
+            let user_msg = user_message.to_string();
+            let autosave_key = format!("user_msg:{}", uuid::Uuid::new_v4());
+            let chars = user_msg.chars().count();
+            log::debug!(
+                "[agent_autosave] enqueue user-message store key={autosave_key} chars={chars}"
+            );
+            tokio::spawn(async move {
+                match memory
+                    .store(
+                        "",
+                        &autosave_key,
+                        &user_msg,
+                        MemoryCategory::Conversation,
+                        None,
+                    )
+                    .await
+                {
+                    Ok(()) => log::debug!(
+                        "[agent_autosave] stored user-message key={autosave_key} chars={chars}"
+                    ),
+                    Err(err) => log::warn!(
+                        "[agent_autosave] user-message memory autosave failed key={autosave_key} err={err}"
+                    ),
+                }
+            });
         }
 
         log::info!("[agent] loading memory context for user message");
@@ -271,11 +335,11 @@ impl Agent {
         // heuristic and size cap rationale.
         let enriched = {
             use crate::openhuman::workflows::inject;
-            let matches = inject::match_workflows(&self.skills, user_message);
+            let matches = inject::match_workflows(&self.workflows, user_message);
             if matches.is_empty() {
                 log::debug!(
-                    "[skills:inject] no skill matches for user message (skill_catalog_len={})",
-                    self.skills.len()
+                    "[workflows:inject] no skill matches for user message (skill_catalog_len={})",
+                    self.workflows.len()
                 );
                 enriched
             } else {
@@ -286,7 +350,7 @@ impl Agent {
                 );
                 let matched_count = injection.decisions.iter().filter(|d| d.matched).count();
                 log::info!(
-                    "[skills:inject] summary candidates={} matched={} injected_bytes={} truncated_any={}",
+                    "[workflows:inject] summary candidates={} matched={} injected_bytes={} truncated_any={}",
                     injection.decisions.len(),
                     matched_count,
                     injection.injected_bytes,
@@ -311,8 +375,13 @@ impl Agent {
             None => enriched,
         };
 
-        self.history
-            .push(ConversationMessage::Chat(ChatMessage::user(enriched)));
+        // Same one-shot treatment for MCP servers connected mid-session
+        // (queued above). `.take()` clears it so it fires exactly once.
+        let pending_mcp = std::mem::take(&mut self.pending_mcp_announcement);
+        let enriched = match mcp_announcement_note(&pending_mcp) {
+            Some(note) => format!("{note}\n\n{enriched}"),
+            None => enriched,
+        };
 
         // Pin the main agent to its configured model for the lifetime of
         // the session. Per-turn classification used to run here, but it
@@ -324,6 +393,10 @@ impl Agent {
         // model prompt, not in the Rust-side classifier. Sub-agents pick
         // their own tier via `ModelSpec::Hint(...)` in their definition.
         let effective_model = self.model_name.clone();
+        // Capture before `self` is borrowed by the turn observer below, so it can
+        // be installed as the `current_model_vision` task-local around the engine
+        // call (read by the image gate for custom/BYOK vision models).
+        let model_vision = self.model_vision;
         log::info!(
             "[agent_loop] model pinned model={} (per-turn classification disabled for KV cache stability)",
             effective_model
@@ -335,6 +408,13 @@ impl Agent {
         // model field with the post-classification effective model.
         let mut parent_context = self.build_parent_execution_context();
         parent_context.model_name = effective_model.clone();
+
+        let enriched = self
+            .inject_triggered_memory_agent_context(user_message, enriched, &parent_context)
+            .await;
+
+        self.history
+            .push(ConversationMessage::Chat(ChatMessage::user(enriched)));
 
         // Bump the session-memory turn counter. Used later by
         // `should_extract_session_memory` to decide whether to spawn a
@@ -404,10 +484,19 @@ impl Agent {
             };
             let turn_run_queue = self.run_queue.clone();
             let cached_prefix = self.cached_transcript_messages.take();
+            // Resolve the context window once per turn through the provider so
+            // local providers (LM Studio) trim to their runtime-loaded n_ctx
+            // rather than the trained-max table (#3550 / TAURI-RUST-6V0).
+            // Must run before `agent: self` takes the &mut borrow below.
+            let turn_context_window = self
+                .provider
+                .effective_context_window(&effective_model)
+                .await;
             let mut observer = AgentObserver {
                 agent: self,
                 artifact_store,
                 effective_model: effective_model.clone(),
+                context_window: turn_context_window,
                 cumulative_input: 0,
                 cumulative_output: 0,
                 cumulative_cached: 0,
@@ -430,26 +519,42 @@ impl Agent {
             // overflow happens during the parent's poll on the way in
             // — verified against the `chat-harness-subagent` Playwright
             // lane crash on PR #3151.
-            let outcome = Box::pin(super::super::super::engine::run_turn_engine(
-                provider.as_ref(),
-                &mut buf,
-                &mut tool_source,
-                &progress,
-                &mut observer,
-                &checkpoint,
-                &parser,
-                &provider_name,
-                &effective_model,
-                temperature,
-                true, // silent — the channel/UI renders via progress + the return value
-                &multimodal,
-                &multimodal_files,
-                max_iterations,
-                None, // the web bridge streams via on_progress deltas, not on_delta
-                &[],
-                turn_run_queue,
-            ))
-            .await?;
+            // Carry the current turn's image placeholders so a delegation to the
+            // vision sub-agent (analyze_image) can forward the attached image
+            // into its prompt — the orchestrator's own non-vision turn keeps the
+            // placeholder as text and never rehydrates it.
+            let turn_image_placeholders =
+                crate::openhuman::agent::multimodal::extract_image_placeholders_in_text(
+                    user_message,
+                );
+            let outcome =
+                super::super::super::turn_attachments_context::with_current_turn_image_placeholders(
+                    turn_image_placeholders,
+                    super::super::super::model_vision_context::with_current_model_vision(
+                        model_vision,
+                        Box::pin(super::super::super::engine::run_turn_engine(
+                    provider.as_ref(),
+                    &mut buf,
+                    &mut tool_source,
+                    &progress,
+                    &mut observer,
+                    &checkpoint,
+                    &parser,
+                    &provider_name,
+                    &effective_model,
+                    temperature,
+                    true, // silent — the channel/UI renders via progress + the return value
+                    &multimodal,
+                    &multimodal_files,
+                    max_iterations,
+                    None, // the web bridge streams via on_progress deltas, not on_delta
+                    &[],
+                    turn_run_queue,
+                    None, // main agent compacts via its ContextManager in before_dispatch
+                        )),
+                    ),
+                )
+                .await?;
 
             // Pull the observer's accounting out, then drop it to release the
             // `&mut self` borrow so the epilogue can use `self`.
@@ -608,6 +713,109 @@ impl Agent {
             }
             Err(err) => {
                 log::warn!("[agent-experience] retrieval failed (non-fatal): {err}");
+                enriched
+            }
+        }
+    }
+
+    async fn inject_triggered_memory_agent_context(
+        &self,
+        user_message: &str,
+        enriched: String,
+        parent_context: &ParentExecutionContext,
+    ) -> String {
+        const MEMORY_AGENT_ID: &str = "agent_memory";
+        const MAX_MEMORY_AGENT_BLOCK_CHARS: usize = 8000;
+
+        if self.trigger_memory_agent != TriggerMemoryAgent::Always {
+            log::debug!(
+                "[agent_memory:trigger] skipped agent_id={} policy={:?}",
+                self.agent_definition_id,
+                self.trigger_memory_agent
+            );
+            return enriched;
+        }
+
+        if self.agent_definition_id == MEMORY_AGENT_ID {
+            log::debug!("[agent_memory:trigger] skipped recursive memory agent invocation");
+            return enriched;
+        }
+
+        let Some(registry) = harness::AgentDefinitionRegistry::global() else {
+            log::warn!(
+                "[agent_memory:trigger] AgentDefinitionRegistry unavailable; continuing without memory agent context"
+            );
+            return enriched;
+        };
+        let Some(definition) = registry.get(MEMORY_AGENT_ID).cloned() else {
+            log::warn!(
+                "[agent_memory:trigger] `{MEMORY_AGENT_ID}` definition unavailable; continuing without memory agent context"
+            );
+            return enriched;
+        };
+
+        let task_id = format!("mem-trigger-{}", uuid::Uuid::new_v4());
+        let prompt = format!(
+            "Search the user's memory tree and return only context relevant to the next agent turn.\n\nUser prompt:\n{user_message}"
+        );
+        let options = harness::SubagentRunOptions {
+            task_id: Some(task_id.clone()),
+            model_override: Some(parent_context.model_name.clone()),
+            ..Default::default()
+        };
+
+        log::debug!(
+            "[agent_memory:trigger] starting agent_id={} task_id={} user_message_chars={}",
+            self.agent_definition_id,
+            task_id,
+            user_message.chars().count()
+        );
+
+        let started = std::time::Instant::now();
+        let result = harness::with_parent_context(parent_context.clone(), async move {
+            harness::run_subagent(&definition, &prompt, options).await
+        })
+        .await;
+
+        match result {
+            Ok(outcome) => {
+                log::info!(
+                    "[agent_memory:trigger] completed agent_id={} task_id={} iterations={} elapsed={:?} status={:?} output_chars={}",
+                    self.agent_definition_id,
+                    task_id,
+                    outcome.iterations,
+                    started.elapsed(),
+                    outcome.status,
+                    outcome.output.chars().count()
+                );
+                let mut output =
+                    truncate_with_ellipsis(&outcome.output, MAX_MEMORY_AGENT_BLOCK_CHARS);
+                if let harness::subagent_runner::SubagentRunStatus::AwaitingUser {
+                    question, ..
+                } = &outcome.status
+                {
+                    let question = question.trim();
+                    if !question.is_empty() {
+                        output.push_str("\n\nMemory agent needs clarification: ");
+                        output.push_str(question);
+                    }
+                }
+                output = truncate_with_ellipsis(&output, MAX_MEMORY_AGENT_BLOCK_CHARS);
+                if output.trim().is_empty() {
+                    return enriched;
+                }
+                format!(
+                    "## Memory agent context\n\n{}\n\n---\n\n{}",
+                    output.trim(),
+                    enriched
+                )
+            }
+            Err(err) => {
+                log::warn!(
+                    "[agent_memory:trigger] failed agent_id={} task_id={}: {err:#}",
+                    self.agent_definition_id,
+                    task_id
+                );
                 enriched
             }
         }

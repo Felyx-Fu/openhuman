@@ -254,6 +254,18 @@ pub fn client_config_json(config: &Config) -> serde_json::Value {
             })
         })
         .collect();
+    let model_registry: Vec<serde_json::Value> = config
+        .model_registry
+        .iter()
+        .map(|m| {
+            serde_json::json!({
+                "id": m.id,
+                "provider": m.provider,
+                "cost_per_1m_output": m.cost_per_1m_output,
+                "vision": m.vision,
+            })
+        })
+        .collect();
 
     serde_json::json!({
         "api_url": config.api_url,
@@ -263,11 +275,13 @@ pub fn client_config_json(config: &Config) -> serde_json::Value {
         "api_key_set": api_key_set,
         "model_routes": model_routes,
         "cloud_providers": cloud_providers,
+        "model_registry": model_registry,
         "primary_cloud": config.primary_cloud,
         "chat_provider": config.chat_provider,
         "reasoning_provider": config.reasoning_provider,
         "agentic_provider": config.agentic_provider,
         "coding_provider": config.coding_provider,
+        "vision_provider": config.vision_provider,
         "memory_provider": config.memory_provider,
         "embeddings_provider": config.embeddings_provider,
         "heartbeat_provider": config.heartbeat_provider,

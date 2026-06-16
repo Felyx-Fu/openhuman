@@ -5,6 +5,7 @@
 
 use super::{dedup_visible_tool_specs, visible_tool_specs_for_policy};
 use crate::openhuman::agent::harness::session::types::{Agent, AgentBuilder};
+use crate::openhuman::agent::harness::TriggerMemoryAgent;
 use crate::openhuman::agent::memory_loader::DefaultMemoryLoader;
 use crate::openhuman::agent_tool_policy::ToolPolicyEngine;
 use crate::openhuman::config::ContextConfig;
@@ -28,10 +29,11 @@ impl AgentBuilder {
             config: None,
             context_config: None,
             model_name: None,
+            model_vision: None,
             temperature: None,
             workspace_dir: None,
             action_dir: None,
-            skills: None,
+            workflows: None,
             auto_save: None,
             post_turn_hooks: Vec::new(),
             learning_enabled: false,
@@ -43,6 +45,7 @@ impl AgentBuilder {
             omit_profile: None,
             omit_memory_md: None,
             payload_summarizer: None,
+            trigger_memory_agent: None,
             tool_policy: None,
             archivist_hook: None,
             unified_compaction_enabled: true,
@@ -140,6 +143,14 @@ impl AgentBuilder {
         self
     }
 
+    /// Sets the user-configured vision capability for the resolved model.
+    /// Surfaced to the turn engine's image gate via the `current_model_vision`
+    /// task-local. Defaults to `false` when unset.
+    pub fn model_vision(mut self, model_vision: bool) -> Self {
+        self.model_vision = Some(model_vision);
+        self
+    }
+
     /// Sets the temperature for chat requests.
     pub fn temperature(mut self, temperature: f64) -> Self {
         self.temperature = Some(temperature);
@@ -158,8 +169,8 @@ impl AgentBuilder {
     }
 
     /// Sets the skills available to the agent.
-    pub fn skills(mut self, skills: Vec<crate::openhuman::workflows::Workflow>) -> Self {
-        self.skills = Some(skills);
+    pub fn workflows(mut self, skills: Vec<crate::openhuman::workflows::Workflow>) -> Self {
+        self.workflows = Some(skills);
         self
     }
 
@@ -300,6 +311,12 @@ impl AgentBuilder {
         >,
     ) -> Self {
         self.payload_summarizer = Some(summarizer);
+        self
+    }
+
+    /// Forward the target agent definition's pre-turn memory policy.
+    pub fn trigger_memory_agent(mut self, policy: TriggerMemoryAgent) -> Self {
+        self.trigger_memory_agent = Some(policy);
         self
     }
 
@@ -506,10 +523,11 @@ impl AgentBuilder {
                 .unwrap_or_else(|| Box::new(DefaultMemoryLoader::default())),
             config,
             model_name,
+            model_vision: self.model_vision.unwrap_or(false),
             temperature: self.temperature.unwrap_or(0.7),
             workspace_dir,
             action_dir,
-            skills: self.skills.unwrap_or_default(),
+            workflows: self.workflows.unwrap_or_default(),
             auto_save: self.auto_save.unwrap_or(false),
             last_memory_context: None,
             last_turn_citations: Vec::new(),
@@ -558,6 +576,7 @@ impl AgentBuilder {
             omit_profile: self.omit_profile.unwrap_or(true),
             omit_memory_md: self.omit_memory_md.unwrap_or(true),
             payload_summarizer: self.payload_summarizer,
+            trigger_memory_agent: self.trigger_memory_agent.unwrap_or_default(),
             tool_policy: self.tool_policy.unwrap_or_else(|| {
                 Arc::new(crate::openhuman::agent::tool_policy::AllowAllToolPolicy)
             }),
@@ -565,6 +584,8 @@ impl AgentBuilder {
             composio_integrations_rx: None,
             announced_integrations: std::collections::HashSet::new(),
             pending_integration_announcement: Vec::new(),
+            announced_mcp_servers: std::collections::HashSet::new(),
+            pending_mcp_announcement: Vec::new(),
             archivist_hook: self.archivist_hook,
             synthesized_tool_names: std::collections::HashSet::new(),
             pending_synthesized_tools_mask: std::collections::HashSet::new(),

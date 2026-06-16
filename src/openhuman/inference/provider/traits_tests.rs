@@ -55,6 +55,7 @@ fn chat_response_helpers() {
             id: "1".into(),
             name: "shell".into(),
             arguments: "{}".into(),
+            extra_content: None,
         }],
         usage: None,
         reasoning_content: None,
@@ -69,6 +70,7 @@ fn tool_call_serialization() {
         id: "call_123".into(),
         name: "file_read".into(),
         arguments: r#"{"path":"test.txt"}"#.into(),
+        extra_content: None,
     };
     let json = serde_json::to_string(&tc).unwrap();
     assert!(json.contains("call_123"));
@@ -269,6 +271,7 @@ async fn provider_chat_prompt_guided_fallback() {
         messages: &[ChatMessage::user("Hello")],
         tools: Some(&tools),
         stream: None,
+        max_tokens: None,
     };
 
     let response = provider.chat(request, "model", 0.7).await.unwrap();
@@ -287,6 +290,7 @@ async fn provider_chat_without_tools() {
         messages: &[ChatMessage::user("Hello")],
         tools: None,
         stream: None,
+        max_tokens: None,
     };
 
     let response = provider.chat(request, "model", 0.7).await.unwrap();
@@ -388,6 +392,7 @@ async fn provider_chat_prompt_guided_preserves_existing_system_not_first() {
         ],
         tools: Some(&tools),
         stream: None,
+        max_tokens: None,
     };
 
     let response = provider.chat(request, "model", 0.7).await.unwrap();
@@ -411,6 +416,7 @@ async fn provider_chat_prompt_guided_uses_convert_tools_override() {
         messages: &[ChatMessage::system("BASE"), ChatMessage::user("Hello")],
         tools: Some(&tools),
         stream: None,
+        max_tokens: None,
     };
 
     let response = provider.chat(request, "model", 0.7).await.unwrap();
@@ -434,6 +440,7 @@ async fn provider_chat_prompt_guided_rejects_non_prompt_payload() {
         messages: &[ChatMessage::user("Hello")],
         tools: Some(&tools),
         stream: None,
+        max_tokens: None,
     };
 
     let err = provider.chat(request, "model", 0.7).await.unwrap_err();

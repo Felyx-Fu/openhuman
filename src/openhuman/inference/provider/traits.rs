@@ -59,6 +59,14 @@ pub struct ToolCall {
     pub id: String,
     pub name: String,
     pub arguments: String,
+    /// Provider-specific passthrough metadata for this call, captured from the
+    /// response and echoed back verbatim on the next assistant turn. Carries
+    /// Google Gemini's required `extra_content.google.thought_signature` so
+    /// multi-turn tool calling round-trips without a 400 (TAURI-RUST-4PK).
+    /// `None`/omitted for every provider that doesn't emit it, so non-Gemini
+    /// history stays byte-identical.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub extra_content: Option<serde_json::Value>,
 }
 
 /// Token usage information returned by the provider after an inference call.
@@ -150,6 +158,20 @@ pub struct ChatRequest<'a> {
     /// implementation ignore the sender and return only the aggregated
     /// response.
     pub stream: Option<&'a tokio::sync::mpsc::Sender<ProviderDelta>>,
+    /// Optional upper bound on output tokens to request from the provider
+    /// (`max_tokens` on the OpenAI-compatible wire).
+    ///
+    /// Left `None` for open-ended generation (orchestrator, agent turns)
+    /// where the model should use its full budget. Set to a small concrete
+    /// value by callers whose output is bounded by construction — notably
+    /// memory extraction, whose response is a tiny structured-JSON object.
+    /// Beyond capping wasted generation, this stops credit-metered providers
+    /// (e.g. OpenRouter) from reserving the model's *entire* output window
+    /// during their pre-flight balance check: an unset `max_tokens` makes
+    /// OpenRouter price the request against the full 64k+ window and 402 a
+    /// low-balance BYO user who could easily afford the few thousand tokens
+    /// an extraction actually needs (TAURI-RUST-C62).
+    pub max_tokens: Option<u32>,
 }
 
 /// A tool result to feed back to the LLM.
@@ -402,12 +424,30 @@ pub trait Provider: Send + Sync {
     }
 
     /// Structured chat API for agent loop callers.
+    ///
+    /// **`max_tokens` caveat:** the default implementation delegates to
+    /// [`Self::chat_with_history`], whose signature carries no output-token
+    /// budget, so a `request.max_tokens` set by the caller is **not** honored
+    /// on this path. Providers that need to enforce an output cap (e.g. the
+    /// OpenAI-compatible provider, which threads it onto the wire for
+    /// credit-metered backends — TAURI-RUST-C62) override `chat()` directly.
+    /// The drop is logged below rather than silently swallowed; it is not a
+    /// hard error because no production caller both sets `max_tokens` and
+    /// routes through a default-`chat()` provider (agent turns pass `None`;
+    /// memory extraction uses the compatible provider).
     async fn chat(
         &self,
         request: ChatRequest<'_>,
         model: &str,
         temperature: f64,
     ) -> anyhow::Result<ChatResponse> {
+        if let Some(cap) = request.max_tokens {
+            log::debug!(
+                "[provider] default chat() for model={model} ignores max_tokens={cap} — \
+                 this provider does not override chat() and chat_with_history() carries no \
+                 output budget; the cap will not reach the wire"
+            );
+        }
         let log_prompts = should_log_prompts();
         // If tools are provided but provider doesn't support native tools,
         // inject tool instructions into system prompt as fallback.
@@ -481,6 +521,21 @@ pub trait Provider: Send + Sync {
     /// Whether provider supports multimodal vision input.
     fn supports_vision(&self) -> bool {
         self.capabilities().vision
+    }
+
+    /// Effective context window (in tokens) for `model`, used for
+    /// pre-dispatch history trimming.
+    ///
+    /// Defaults to the static model table
+    /// ([`crate::openhuman::inference::context_window_for_model`]), which
+    /// reflects a model's *trained maximum* context. Local providers
+    /// override this to report the model's **runtime-loaded** window — e.g.
+    /// LM Studio lets the user load a model with a smaller `n_ctx` than its
+    /// trained maximum, and budgeting against the max overflows the loaded
+    /// window so the request is rejected (issue #3550 / Sentry
+    /// TAURI-RUST-6V0). `None` means "unknown — skip pre-dispatch trimming".
+    async fn effective_context_window(&self, model: &str) -> Option<u64> {
+        crate::openhuman::inference::context_window_for_model(model)
     }
 
     /// Warm up the HTTP connection pool (TLS handshake, DNS, HTTP/2 setup).
