@@ -2943,6 +2943,7 @@ const en: TranslationMap = {
   'notifications.category.meetings': 'Meetings',
   'notifications.category.reminders': 'Reminders',
   'notifications.category.important': 'Important',
+  'notifications.filterAll': 'All',
 
   // About / Updates: status summary phrases
   'about.update.status.checking': 'Checking...',
