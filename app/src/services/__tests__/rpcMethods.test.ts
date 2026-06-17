@@ -124,6 +124,10 @@ describe('rpcMethods catalog', () => {
         'utf8'
       ),
       fs.readFileSync(
+        path.resolve(__dirname, '../../../../src/openhuman/channels/controllers/schemas.rs'),
+        'utf8'
+      ),
+      fs.readFileSync(
         path.resolve(__dirname, '../../../../src/openhuman/inference/provider/schemas.rs'),
         'utf8'
       ),
@@ -155,17 +159,19 @@ describe('rpcMethods catalog', () => {
       const methodRoot = method.slice('openhuman.'.length);
       const namespace = methodRoot.startsWith('screen_intelligence_')
         ? 'screen_intelligence'
-        : methodRoot.startsWith('inference_')
-          ? 'inference'
-          : methodRoot.startsWith('embeddings_')
-            ? 'embeddings'
-            : methodRoot.startsWith('providers_')
-              ? 'providers'
-              : methodRoot.startsWith('mcp_clients_')
-                ? 'mcp_clients'
-                : methodRoot.startsWith('health_')
-                  ? 'health'
-                  : 'config';
+        : methodRoot.startsWith('channels_')
+          ? 'channels'
+          : methodRoot.startsWith('inference_')
+            ? 'inference'
+            : methodRoot.startsWith('embeddings_')
+              ? 'embeddings'
+              : methodRoot.startsWith('providers_')
+                ? 'providers'
+                : methodRoot.startsWith('mcp_clients_')
+                  ? 'mcp_clients'
+                  : methodRoot.startsWith('health_')
+                    ? 'health'
+                    : 'config';
       const fnName = methodRoot.slice(`${namespace}_`.length);
       expect(schemaSources).toContain(`namespace: "${namespace}"`);
       expect(schemaSources).toContain(`function: "${fnName}"`);
