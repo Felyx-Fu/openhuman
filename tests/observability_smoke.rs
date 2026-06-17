@@ -252,7 +252,7 @@ fn drops_aggregate_all_exhausted_when_attempts_are_transient() {
             ("failure", "all_exhausted"),
             ("attempts", "2"),
         ],
-        "All providers/models failed. Attempts: openai API error (503 Service Unavailable); custom_openai API error (502 Bad Gateway)",
+        "All providers/models failed. Attempts:\nopenai API error (503 Service Unavailable)\ncustom_openai API error (502 Bad Gateway)",
     );
     assert_eq!(
         count_captured(vec![event]),
@@ -269,7 +269,7 @@ fn keeps_aggregate_all_exhausted_with_permanent_attempt() {
             ("failure", "all_exhausted"),
             ("attempts", "2"),
         ],
-        "All providers/models failed. Attempts: openai API error (401 Unauthorized); custom_openai API error (503 Service Unavailable)",
+        "All providers/models failed. Attempts:\nopenai API error (401 Unauthorized)\ncustom_openai API error (503 Service Unavailable)",
     );
     assert_eq!(
         count_captured(vec![event]),

@@ -2206,6 +2206,20 @@ pub fn run() {
                 );
                 return None;
             }
+            // Defense-in-depth: drop reliable-provider aggregate exhaustion
+            // only when every recorded provider/model attempt is already a
+            // transient failure. Mirrors the standalone core binary's
+            // before_send chain; the desktop shell links the core
+            // in-process, so production desktop events land here.
+            if openhuman_core::core::observability::is_all_transient_provider_exhaustion_event(
+                &event,
+            ) {
+                log::debug!(
+                    "[sentry-all-transient-filter] dropping all-transient provider exhaustion event_id={:?}",
+                    event.event_id
+                );
+                return None;
+            }
             // Drop 401 "Session expired. Please log in again." bodies and
             // pre-flight "no session token stored" guards — mirrors the
             // core binary's before_send chain. Since #1061 the Tauri shell

@@ -1873,7 +1873,11 @@ fn all_provider_attempts_are_transient(message: &str) -> bool {
         return false;
     };
     let mut saw_attempt = false;
-    for attempt in attempts.split(';').map(str::trim).filter(|s| !s.is_empty()) {
+    for attempt in attempts
+        .split(['\n', ';'])
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    {
         saw_attempt = true;
         if !is_transient_message_failure(attempt) {
             return false;
