@@ -503,7 +503,7 @@ encrypt = false
         skill_file.display()
     );
 
-    // ── Step 6: install (duplicate rejection) ─────────────────────────────
+    // ── Step 6: install (duplicate idempotent success) ────────────────────
 
     let dup_resp = post_json_rpc(
         &rpc_base,
@@ -512,14 +512,22 @@ encrypt = false
         json!({ "entry_id": entry_id }),
     )
     .await;
-    let dup_error = assert_jsonrpc_error(&dup_resp, "skill_registry_install (duplicate)");
-    let dup_message = dup_error
-        .get("message")
+    let dup_result = assert_no_jsonrpc_error(&dup_resp, "skill_registry_install (duplicate)");
+    let dup_new_skills = dup_result
+        .get("new_skills")
+        .and_then(Value::as_array)
+        .expect("duplicate install result should include new_skills array");
+    assert!(
+        dup_new_skills.is_empty(),
+        "duplicate install should not report new skills, got: {dup_new_skills:?}"
+    );
+    let dup_stdout = dup_result
+        .get("stdout")
         .and_then(Value::as_str)
         .unwrap_or_default();
     assert!(
-        dup_message.contains("already installed"),
-        "duplicate install error should mention 'already installed', got: {dup_message}"
+        dup_stdout.contains("already installed"),
+        "duplicate install stdout should mention 'already installed', got: {dup_stdout}"
     );
 
     // ── Step 7: uninstall ─────────────────────────────────────────────────
