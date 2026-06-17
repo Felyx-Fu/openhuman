@@ -10,14 +10,16 @@
  * via the shared `NotificationBody` component.
  */
 import { configureStore } from '@reduxjs/toolkit';
-import { fireEvent, render, screen, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { Provider } from 'react-redux';
 import { MemoryRouter } from 'react-router-dom';
 import { describe, expect, it, vi } from 'vitest';
 
 import notificationsReducer, {
+  clearAll,
   type NotificationCategory,
   type NotificationItem,
+  notificationReceived,
 } from '../../store/notificationSlice';
 import Notifications from '../Notifications';
 
@@ -200,5 +202,31 @@ describe('Notifications page category filter', () => {
     // Two elements carry 'alerts.empty' (header subtext + empty-state body) — both correct.
     expect(screen.getAllByText('alerts.empty').length).toBeGreaterThan(0);
     expect(screen.queryByText('notifications.filterEmpty')).not.toBeInTheDocument();
+  });
+
+  it('resets a stale selected category when that category leaves the feed', async () => {
+    const { store } = renderPage([
+      makeItem('m-1', 'msg one', { category: 'messages' }),
+      makeItem('s-1', 'system one', { category: 'system' }),
+    ]);
+
+    fireEvent.click(screen.getByTestId('notif-filter-chip-messages'));
+    expect(screen.getAllByTestId('notification-item')).toHaveLength(1);
+
+    act(() => {
+      store.dispatch(clearAll());
+      store.dispatch(notificationReceived(makeItem('s-2', 'system two', { category: 'system' })));
+    });
+
+    await waitFor(() =>
+      expect(screen.getByTestId('notif-filter-chip-all')).toHaveAttribute('aria-pressed', 'true')
+    );
+
+    act(() => {
+      store.dispatch(notificationReceived(makeItem('m-2', 'msg two', { category: 'messages' })));
+    });
+
+    expect(screen.getByTestId('notif-filter-chip-all')).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getAllByTestId('notification-item')).toHaveLength(2);
   });
 });

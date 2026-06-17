@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 
 import NotificationBody from '../components/notifications/NotificationBody';
@@ -52,6 +52,13 @@ const Notifications = () => {
     () => CATEGORY_ORDER.filter(c => items.some(item => item.category === c)),
     [items]
   );
+
+  useEffect(() => {
+    if (selectedCategory !== 'all' && !presentCategories.includes(selectedCategory)) {
+      const resetTimer = window.setTimeout(() => setSelectedCategory('all'), 0);
+      return () => window.clearTimeout(resetTimer);
+    }
+  }, [presentCategories, selectedCategory]);
 
   // If the active filter's category drains out of the feed, fall back to All.
   const activeCategory: CategoryFilter =
