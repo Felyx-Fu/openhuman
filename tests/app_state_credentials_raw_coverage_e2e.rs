@@ -248,8 +248,24 @@ async fn store_session_auth_me_failure_returns_err_and_does_not_persist() {
         err.contains("Session validation failed (GET /auth/me)"),
         "unexpected error: {err}"
     );
-    // The gate returns before the persist step, so the session is never written —
-    // the next snapshot is unauthenticated and the UI shows signin.
+
+    // Explicitly verify the failure path persisted NOTHING — the gate returns
+    // before the persist step, so the snapshot must read back as unauthenticated
+    // with no session token (a partial regression that wrote a profile would
+    // otherwise still pass on the Err check alone). This is what leaves the user
+    // on the signin page.
+    let snap = snapshot()
+        .await
+        .expect("snapshot after failed store_session")
+        .value;
+    assert!(
+        !snap.auth.is_authenticated,
+        "auth must remain unauthenticated after a failed store_session"
+    );
+    assert!(
+        snap.session_token.is_none(),
+        "session token must not be persisted after a failed store_session"
+    );
 }
 
 #[tokio::test]
