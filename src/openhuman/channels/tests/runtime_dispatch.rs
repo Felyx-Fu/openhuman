@@ -323,7 +323,8 @@ async fn channel_processed_event_records_resolved_agent_route() {
     )
     .await;
 
-    loop {
+    let mut matched = false;
+    for _ in 0..50 {
         let event = tokio::time::timeout(Duration::from_millis(200), events.recv())
             .await
             .expect("ChannelMessageProcessed event should be published")
@@ -346,9 +347,14 @@ async fn channel_processed_event_records_resolved_agent_route() {
             assert_eq!(response, "CANNED_RESPONSE_FROM_RESOLVED_ROUTE");
             assert_eq!(provider, "actual-provider");
             assert_eq!(model, "actual-model");
+            matched = true;
             break;
         }
     }
+    assert!(
+        matched,
+        "did not observe ChannelMessageProcessed for resolved-route-msg"
+    );
 }
 
 /// Security regression for the `[FILE:…]` smuggling vector: a remote
