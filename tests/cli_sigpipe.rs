@@ -1,6 +1,7 @@
 #[cfg(unix)]
 #[test]
 fn help_output_closed_pipe_does_not_panic() {
+    use std::os::unix::process::ExitStatusExt;
     use std::process::{Command, Stdio};
 
     let mut child = Command::new(env!("CARGO_BIN_EXE_openhuman-core"))
@@ -15,6 +16,11 @@ fn help_output_closed_pipe_does_not_panic() {
     let output = child.wait_with_output().expect("wait for openhuman-core");
     let stderr = String::from_utf8_lossy(&output.stderr);
 
+    assert!(
+        output.status.success() || output.status.signal() == Some(libc::SIGPIPE),
+        "unexpected exit status for closed-pipe help path: {:?}, stderr={stderr}",
+        output.status
+    );
     assert!(
         !stderr.contains("Broken pipe"),
         "stderr must not include a broken-pipe panic: {stderr}"
