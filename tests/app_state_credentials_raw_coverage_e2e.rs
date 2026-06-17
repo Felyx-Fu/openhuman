@@ -250,6 +250,18 @@ async fn store_session_auth_me_failure_returns_err_and_does_not_persist() {
     );
     // The gate returns before the persist step, so the session is never written —
     // the next snapshot is unauthenticated and the UI shows signin.
+    let snap = snapshot()
+        .await
+        .expect("snapshot after failed store_session")
+        .value;
+    assert!(
+        !snap.auth.is_authenticated,
+        "auth should remain unauthenticated after failed store_session"
+    );
+    assert!(
+        snap.session_token.is_none(),
+        "session token must not be persisted after failed store_session"
+    );
 }
 
 #[tokio::test]
