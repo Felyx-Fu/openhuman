@@ -403,6 +403,10 @@ describe('AIPanel', () => {
 
     fireEvent.click(screen.getByRole('switch', { name: /Connect Novita AI/i }));
     const dialog = await screen.findByRole('dialog', { name: /Connect Novita AI/i });
+    expect(within(dialog).getByLabelText(/API key/i)).toHaveAttribute(
+      'placeholder',
+      'Novita API key'
+    );
     fireEvent.change(within(dialog).getByLabelText(/API key/i), {
       target: { value: 'sk-novita-test' },
     });
