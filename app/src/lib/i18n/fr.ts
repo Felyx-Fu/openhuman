@@ -1370,6 +1370,9 @@ const messages: TranslationMap = {
     'Réinstallez ce serveur avec les valeurs suggérées pour les appliquer: {keys}',
   'mcp.detail.connect': 'Connecter',
   'mcp.detail.connecting': 'Connexion...',
+  'mcp.detail.authenticate': 'Se connecter',
+  'mcp.detail.authRequired':
+    "Ce serveur nécessite que vous vous connectiez ou ajoutiez un jeton d'accès avant de pouvoir se connecter. Cliquez sur « Se connecter » pour vous authentifier.",
   'mcp.detail.disconnect': 'Déconnecter',
   'mcp.detail.hideAssistant': "Cacher l'assistant",
   'mcp.detail.helpConfigure': 'Aidez-moi à configurer',
@@ -1388,6 +1391,7 @@ const messages: TranslationMap = {
   'mcp.detail.enable': 'Activer',
   'mcp.detail.disable': 'Désactiver',
   'mcp.status.disabled': 'Désactivé',
+  'mcp.status.unauthorized': 'Connexion requise',
   'mcp.detail.tools': 'Outils',
   'mcp.connectAuth.title': 'Connecter {name}',
   'mcp.connectAuth.hint':
@@ -4739,6 +4743,8 @@ const messages: TranslationMap = {
   'skills.meetingBots.recentCallsEmpty':
     'Pas encore d\u2019appels précédents — votre historique de réunions apparaîtra ici.',
   'skills.meetingBots.recentCallsLoading': 'Chargement\u2026',
+  'skills.meetingBots.recentCallAddedBy': 'Ajouté par {name}',
+  'skills.meetingBots.recentCallParticipants': 'Avec {names}',
   'skills.meetingBots.liveBadge': 'En direct',
   'skills.meetingBots.liveTitle': 'En réunion',
   'skills.meetingBots.liveStatusJoining': 'Connexion\u2026',

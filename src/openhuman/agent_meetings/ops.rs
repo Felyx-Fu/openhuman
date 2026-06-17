@@ -327,6 +327,26 @@ pub async fn handle_join(params: Map<String, Value>) -> Result<Value, String> {
         .await
         .map_err(|e| format!("[agent_meetings] emit failed: {e}"))?;
 
+    // Snapshot join context so the post-call recent-calls record can show who
+    // launched the bot, into which meeting. Keyed by correlation_id; consumed
+    // when the `BackendMeetTranscript` event arrives at call-end. No-op when
+    // the caller didn't supply a correlation_id.
+    super::recent_calls::remember_join(
+        req.correlation_id.as_deref(),
+        super::recent_calls::JoinMeta {
+            meet_url: normalized_url.to_string(),
+            // "Your Name in This Meeting" — the human who launched the bot and
+            // whom it answers to. This is the owner shown in the recent-calls list.
+            owner_display_name: req.respond_to_participant.clone().unwrap_or_default(),
+            // The bot's tile name in the meeting (persona display name).
+            bot_display_name: display_name.clone(),
+            started_at_ms: std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_millis() as u64)
+                .unwrap_or(0),
+        },
+    );
+
     // Active mode (listen_only = false, the modal's "respond when addressed"
     // toggle) enables in-call agency for just this meeting, so the toggle
     // "just works" without flipping the global config. Passive joins leave

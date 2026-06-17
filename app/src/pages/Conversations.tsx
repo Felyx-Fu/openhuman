@@ -1859,13 +1859,6 @@ const Conversations = ({
               const isAgentTextMode = msg.sender === 'agent' && agentMessageViewMode === 'text';
               return (
                 <div key={msg.id}>
-                  {shouldRenderTimelineBeforeLatestAgentMessage &&
-                    latestVisibleAgentMessage?.id === msg.id && (
-                      <ToolTimelineBlock
-                        entries={selectedThreadToolTimeline}
-                        onViewSubagent={sub => setOpenSubagentTaskId(sub.taskId)}
-                      />
-                    )}
                   <div
                     className={`group/msg flex ${msg.sender === 'user' ? 'justify-end' : 'justify-start'}`}>
                     <div
@@ -1913,16 +1906,6 @@ const Conversations = ({
                             if (citations.length === 0) return null;
                             return <CitationChips citations={citations} />;
                           })()}
-                          {shouldRenderTimelineBeforeLatestAgentMessage &&
-                            latestVisibleAgentMessage?.id === msg.id && (
-                              <button
-                                type="button"
-                                onClick={() => setShowProcessSource(true)}
-                                data-testid="view-process-source"
-                                className="px-1 text-[11px] font-medium text-primary-600 hover:underline dark:text-primary-300">
-                                {t('conversations.agentTaskInsights.viewProcessSource')} →
-                              </button>
-                            )}
                           {latestVisibleMessage?.id === msg.id && (
                             <p className="px-1 text-[10px] text-stone-400 dark:text-neutral-500">
                               {formatRelativeTime(msg.createdAt)}
@@ -2254,14 +2237,34 @@ const Conversations = ({
                   </span>
                 </div>
               )}
-            {/* Tool call timeline */}
-            {selectedThreadToolTimeline.length > 0 &&
-              !shouldRenderTimelineBeforeLatestAgentMessage && (
-                <ToolTimelineBlock
-                  entries={selectedThreadToolTimeline}
-                  onViewSubagent={sub => setOpenSubagentTaskId(sub.taskId)}
-                />
-              )}
+            {/* Agentic task insights — rendered exactly once AFTER the full
+                message list. A single logical assistant turn can be persisted
+                as multiple agent ThreadMessages; anchoring the panel before the
+                last agent message split the response into two disconnected
+                chunks (issue #3717, Bug 2). Hoisting it here keeps the panel
+                after the complete response regardless of how many agent
+                messages the turn produced — both for the settled/inline case
+                (shouldRenderTimelineBeforeLatestAgentMessage) and the live
+                in-flight fallback. */}
+            {selectedThreadToolTimeline.length > 0 && (
+              <ToolTimelineBlock
+                entries={selectedThreadToolTimeline}
+                onViewSubagent={sub => setOpenSubagentTaskId(sub.taskId)}
+              />
+            )}
+            {/* "View full agent process" — only in the settled/inline state
+                (turn finished, an agent message exists). Hoisted out of the
+                per-message map alongside the panel above so it renders once
+                after the response, never interleaved between bubbles. */}
+            {shouldRenderTimelineBeforeLatestAgentMessage && (
+              <button
+                type="button"
+                onClick={() => setShowProcessSource(true)}
+                data-testid="view-process-source"
+                className="px-1 text-[11px] font-medium text-primary-600 hover:underline dark:text-primary-300">
+                {t('conversations.agentTaskInsights.viewProcessSource')} →
+              </button>
+            )}
             {isSending && rustChat && (
               <div className="flex justify-start px-1">
                 <button

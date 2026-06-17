@@ -18,6 +18,7 @@ pub mod bus;
 pub mod calendar;
 pub mod in_call;
 pub mod ops;
+pub mod recent_calls;
 pub mod schemas;
 pub mod store;
 pub mod types;

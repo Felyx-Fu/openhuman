@@ -1338,6 +1338,9 @@ const messages: TranslationMap = {
     'Instal ulang server ini dengan nilai yang disarankan untuk diterapkan: {keys}',
   'mcp.detail.connect': 'Sambungkan',
   'mcp.detail.connecting': 'Sambungan...',
+  'mcp.detail.authenticate': 'Masuk',
+  'mcp.detail.authRequired':
+    'Server ini mengharuskan Anda masuk atau menambahkan token akses sebelum dapat tersambung. Klik “Masuk” untuk mengautentikasi.',
   'mcp.detail.disconnect': 'Putuskan sambungan',
   'mcp.detail.hideAssistant': 'Sembunyikan asisten',
   'mcp.detail.helpConfigure': 'Bantu saya mengonfigurasi',
@@ -1356,6 +1359,7 @@ const messages: TranslationMap = {
   'mcp.detail.enable': 'Aktifkan',
   'mcp.detail.disable': 'Nonaktifkan',
   'mcp.status.disabled': 'Dinonaktifkan',
+  'mcp.status.unauthorized': 'Perlu masuk',
   'mcp.detail.tools': 'Alat',
   'mcp.connectAuth.title': 'Hubungkan {name}',
   'mcp.connectAuth.hint':
@@ -4647,6 +4651,8 @@ const messages: TranslationMap = {
   'skills.meetingBots.recentCallsEmpty':
     'Belum ada panggilan sebelumnya — riwayat rapat Anda akan muncul di sini.',
   'skills.meetingBots.recentCallsLoading': 'Memuat\u2026',
+  'skills.meetingBots.recentCallAddedBy': 'Ditambahkan oleh {name}',
+  'skills.meetingBots.recentCallParticipants': 'Dengan {names}',
   'skills.meetingBots.liveBadge': 'Langsung',
   'skills.meetingBots.liveTitle': 'Dalam Rapat',
   'skills.meetingBots.liveStatusJoining': 'Bergabung\u2026',
