@@ -266,11 +266,19 @@ const handleAuthDeepLink = async (parsed: URL, requireStateNonce = true) => {
       );
     } else {
       const kind = classifyAuthStoreFailure(rawMessage);
-      // Make the bounce observable. `beforeSend` deletes `event.extra`, so carry
-      // the classification on a TAG (survives) + a stable fingerprint so every
-      // session-store failure groups together and is alertable. The exception
-      // message ("Session validation failed (GET /auth/me): …") carries no token.
-      Sentry.captureException(error instanceof Error ? error : new Error(rawMessage), {
+      // Capture a SYNTHETIC error keyed only by `kind` — never the raw error.
+      // Two reasons (both raised in review):
+      //  1. PII: the upstream `/auth/me` failure embeds the verbatim backend
+      //     response body (`rest.rs`: `GET /auth/me failed ({status}): {text}`),
+      //     and `beforeSend` does NOT scrub `exception.values[].value`. Severing
+      //     the message (vs. scrubbing) guarantees no body/email/token-adjacent
+      //     text ships.
+      //  2. Timeout shape: a hang surfaces as `CoreRpcError(kind='timeout')`,
+      //     which `beforeSend` drops via `isCoreRpcTimeoutError(originalException)`
+      //     BEFORE our tag applies. A plain `Error` makes `originalException`
+      //     non-matching, so the lead cause finally reaches Sentry.
+      // The PII-free `kind` tag + stable fingerprint are all we need to group.
+      Sentry.captureException(new Error(`auth store failed: ${kind}`), {
         level: 'error',
         tags: { surface: 'react', phase: 'deep-link-auth-store', auth_store_failure: kind },
         fingerprint: ['deep-link-auth', 'session-store-failed', kind],

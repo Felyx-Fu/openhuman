@@ -372,4 +372,23 @@ describe('classifyAuthStoreFailure', () => {
   ])('classifies %j as %s', (message, expected) => {
     expect(classifyAuthStoreFailure(message)).toBe(expected);
   });
+
+  // Contract pin: the classifier matches substrings of the Rust-produced error
+  // (credentials/ops.rs: `Session validation failed (GET /auth/me): {reason}`,
+  // with {reason} from rest.rs `GET /auth/me failed ({status}): {text}` or a
+  // reqwest transport error). If Rust rewords that prefix, these must fail CI
+  // rather than letting an arm silently degrade to 'other'.
+  it('pins the real Rust store_session failure strings to meaningful kinds', () => {
+    const gateway =
+      'Session validation failed (GET /auth/me): GET /auth/me failed (503): {"error":"unavailable"}';
+    const timeout =
+      'Session validation failed (GET /auth/me): error sending request for url (https://api.tinyhumans.ai/auth/me): operation timed out';
+    const bare = 'Session validation failed (GET /auth/me): something unexpected';
+
+    expect(classifyAuthStoreFailure(gateway)).toBe('auth_me_gateway');
+    expect(classifyAuthStoreFailure(timeout)).toBe('auth_me_timeout');
+    // The bare prefix is still recognized via the auth/me anchor — NOT 'other'.
+    expect(classifyAuthStoreFailure(bare)).toBe('auth_me_other');
+    expect(classifyAuthStoreFailure(bare)).not.toBe('other');
+  });
 });
