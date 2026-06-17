@@ -2,6 +2,7 @@ use super::*;
 use crate::openhuman::credentials::session_support::local_session_user_id;
 use serde_json::json;
 use tempfile::TempDir;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 struct EnvVarGuard {
     key: &'static str,
@@ -84,6 +85,39 @@ async fn store_session_rejects_empty_or_whitespace_token() {
     assert!(err.contains("token is required"));
     let err = store_session(&config, "   ", None, None).await.unwrap_err();
     assert!(err.contains("token is required"));
+}
+
+#[tokio::test]
+async fn store_session_auth_me_failure_keeps_error_prefix_contract() {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let api_url = format!("http://{}", listener.local_addr().unwrap());
+    let server = tokio::spawn(async move {
+        let (mut stream, _) = listener.accept().await.unwrap();
+        let mut req = [0_u8; 2048];
+        let _ = stream.read(&mut req).await;
+        let body = "{\"error\":\"mock /auth/me 500\"}";
+        let response = format!(
+            "HTTP/1.1 500 Internal Server Error\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{}",
+            body.len(),
+            body
+        );
+        let _ = stream.write_all(response.as_bytes()).await;
+        let _ = stream.shutdown().await;
+    });
+
+    let tmp = TempDir::new().unwrap();
+    let mut config = test_config(&tmp);
+    config.api_url = Some(api_url);
+
+    let err = store_session(&config, "header.payload.signature", None, None)
+        .await
+        .unwrap_err();
+    server.await.unwrap();
+
+    assert!(
+        err.starts_with("Session validation failed (GET /auth/me):"),
+        "unexpected store_session error prefix: {err}"
+    );
 }
 
 #[test]
