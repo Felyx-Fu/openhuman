@@ -68,6 +68,52 @@ pub(crate) fn hard_reject_kind(result: &str) -> Option<HardReject> {
     }
 }
 
+/// A permanent, non-retryable inference failure surfaced by a tool result —
+/// typically a delegated sub-agent (`run_code` / `tools_agent` / `plan`) whose
+/// provider call hit a user-state wall. Unlike a transient error, re-issuing the
+/// call cannot succeed even under a *different* delegation tool or varied args:
+/// the budget is account-wide and the model/provider configuration is shared by
+/// every sub-agent. See [`terminal_inference_failure_kind`].
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) enum TerminalInferenceFailure {
+    /// Out of inference budget / credits — every retry hits the same wall.
+    /// Detected via
+    /// [`is_budget_exhausted_message`](crate::openhuman::inference::provider::is_budget_exhausted_message).
+    BudgetExhausted,
+    /// The configured model/provider rejected the request for a reason the user
+    /// must fix (unknown model, non-chat/embedding model, missing credential,
+    /// region block, …). Detected via
+    /// [`is_provider_config_rejection_message`](crate::openhuman::inference::provider::is_provider_config_rejection_message).
+    ProviderConfig,
+}
+
+/// Recognize a permanent (non-retryable) inference failure from a tool result.
+///
+/// Reuses the two deliberately-tight provider classifiers so this stays in
+/// lockstep with the Sentry-demotion phrase sets: a transient / 5xx / generic
+/// 4xx body matches NEITHER, so genuinely retryable failures still get the
+/// normal consecutive-failure grace ([`NO_PROGRESS_FAILURE_THRESHOLD`]) and are
+/// never halted early. Budget takes precedence if both somehow match.
+///
+/// The orchestrator otherwise re-emits a failed delegation under *varied* tool
+/// names (Plan → `run_code` → `tools_agent`), so the identical-`(tool,args)`
+/// [`REPEAT_FAILURE_THRESHOLD`] never trips and the chain grinds through ~6-8
+/// doomed, paid delegations before [`NO_PROGRESS_FAILURE_THRESHOLD`] finally
+/// halts with an opaque "Something went wrong" (#3104). Tripping on the FIRST
+/// permanent failure stops that cascade and surfaces the root cause.
+pub(crate) fn terminal_inference_failure_kind(result: &str) -> Option<TerminalInferenceFailure> {
+    use crate::openhuman::inference::provider::{
+        is_budget_exhausted_message, is_provider_config_rejection_message,
+    };
+    if is_budget_exhausted_message(result) {
+        Some(TerminalInferenceFailure::BudgetExhausted)
+    } else if is_provider_config_rejection_message(result) {
+        Some(TerminalInferenceFailure::ProviderConfig)
+    } else {
+        None
+    }
+}
+
 /// Shared repeated-failure circuit breaker, used by BOTH agent loops
 /// (`run_tool_call_loop` here and `run_inner_loop` in `subagent_runner`) so they
 /// can't drift. Tracks per-`(tool,args)`-signature failure counts and a
@@ -108,6 +154,36 @@ impl RepeatFailureGuard {
             *c += 1;
             *c
         };
+        // Permanent inference failures (out of budget / provider-config rejection)
+        // cannot be recovered by retrying — the budget is account-wide and the
+        // model/provider config is shared by every (sub-)agent. Halt on the FIRST
+        // occurrence with an actionable root cause instead of letting the
+        // orchestrator re-emit the step under varied delegation-tool names until
+        // NO_PROGRESS_FAILURE_THRESHOLD (#3104: Plan → Run Code ×6 → Tools Agent
+        // ×2). Checked before the count-based thresholds precisely because those
+        // never trip in time when the tool name keeps changing.
+        if let Some(kind) = terminal_inference_failure_kind(result) {
+            tracing::warn!(
+                tool,
+                kind = ?kind,
+                "[agent_loop] permanent inference failure — halting on first occurrence with root cause"
+            );
+            return Some(match kind {
+                TerminalInferenceFailure::BudgetExhausted => format!(
+                    "Stopping: the `{tool}` step failed because the account is out of inference \
+                     budget/credits — every retry hits the same wall. Add credits to your account \
+                     and try again. Details:\n{}",
+                    truncate_for_halt(result),
+                ),
+                TerminalInferenceFailure::ProviderConfig => format!(
+                    "Stopping: the `{tool}` step failed because the configured model/provider \
+                     rejected the request (e.g. an unknown model, a non-chat/embedding model, a \
+                     missing credential, or a region block) — retrying will not help. Fix the model \
+                     or API key in Settings → AI. Details:\n{}",
+                    truncate_for_halt(result),
+                ),
+            });
+        }
         // Hard policy rejections trip on the first verbatim repeat; everything
         // else uses the generic identical-retry threshold.
         let hard = hard_reject_kind(result);
