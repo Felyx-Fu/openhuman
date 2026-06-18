@@ -459,7 +459,18 @@ pub(crate) fn parse_hermes_entry(item: &serde_json::Value) -> Option<CatalogEntr
         .and_then(|v| v.as_str())
         .map(|s| s.to_string());
 
-    let download_url = derive_download_url(&source, &category, &name, docs_path.as_deref());
+    let source_url = item
+        .get("sourceUrl")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
+
+    let download_url = derive_download_url(
+        &source,
+        &category,
+        &name,
+        docs_path.as_deref(),
+        source_url.as_deref(),
+    );
 
     Some(CatalogEntry {
         id: name.clone(),
@@ -484,6 +495,7 @@ fn derive_download_url(
     category: &str,
     name: &str,
     docs_path: Option<&str>,
+    source_url: Option<&str>,
 ) -> String {
     if let Ok(base) = std::env::var(DOWNLOAD_BASE_URL_ENV) {
         let base = base.trim().trim_end_matches('/');
@@ -491,9 +503,22 @@ fn derive_download_url(
             return format!("{base}/{name}/SKILL.md");
         }
     }
+    // Bundled built-in / optional skills carry a `docsPath` and live in the
+    // Hermes repo, so derive their raw URL from that (canonical path).
     if let Some(url) = docs_path.and_then(download_url_from_docs_path) {
         return url;
     }
+    // Aggregated community skills (ClawHub, skills.sh, browse.sh, …) carry a
+    // `sourceUrl` instead and live in their OWN repos — honour it when it points
+    // at a fetchable raw GitHub file. Without this every aggregated skill fell
+    // back to the Hermes base below and 404'd at install time (#3741).
+    if let Some(url) = source_url.and_then(normalize_source_url) {
+        return url;
+    }
+    // Last-resort fallback: assume the skill lives in the Hermes repo. Correct
+    // for bundled skills whose `docsPath` was missing/unparseable; still wrong
+    // for non-GitHub sources (clawhub.ai / lobehub.com / skills.sh serve HTML
+    // landing pages, not raw SKILL.md), which need per-platform resolvers.
     let root = match source {
         "optional" => "optional-skills",
         _ => "skills",
@@ -501,6 +526,28 @@ fn derive_download_url(
     format!(
         "https://raw.githubusercontent.com/NousResearch/hermes-agent/main/{root}/{category}/{name}/SKILL.md"
     )
+}
+
+/// Normalise a catalog `sourceUrl` into a fetchable raw-markdown URL, or return
+/// `None` when it can't be (e.g. an HTML landing page on a non-GitHub host).
+///
+/// Handles the two GitHub shapes seen in the catalog:
+/// - a `blob` web URL — `https://github.com/{owner}/{repo}/blob/{ref}/{path}`
+///   → `https://raw.githubusercontent.com/{owner}/{repo}/{ref}/{path}`
+/// - an already-raw URL — passed through when it points at a markdown file.
+fn normalize_source_url(source_url: &str) -> Option<String> {
+    let url = source_url.trim();
+    if url.starts_with("https://raw.githubusercontent.com/") && url.ends_with(".md") {
+        return Some(url.to_string());
+    }
+    let rest = url.strip_prefix("https://github.com/")?;
+    let (repo, after_blob) = rest.split_once("/blob/")?;
+    if repo.is_empty() || !after_blob.ends_with(".md") {
+        return None;
+    }
+    Some(format!(
+        "https://raw.githubusercontent.com/{repo}/{after_blob}"
+    ))
 }
 
 fn download_url_from_docs_path(docs_path: &str) -> Option<String> {
@@ -562,6 +609,87 @@ mod tests {
             entry.download_url,
             "https://raw.githubusercontent.com/NousResearch/hermes-agent/main/optional-skills/devops/docker-management/SKILL.md"
         );
+    }
+
+    #[test]
+    fn parse_hermes_entry_uses_github_blob_source_url_converted_to_raw() {
+        // Aggregated GitHub-hosted skills (e.g. browse.sh) carry a `sourceUrl`
+        // blob URL and no `docsPath`; install must hit the raw file in THAT
+        // repo, not the Hermes fallback (#3741).
+        let item = json!({
+            "name": "login",
+            "description": "Log in",
+            "category": "auth",
+            "source": "browse.sh",
+            "sourceUrl": "https://github.com/browserbase/browse.sh/blob/main/skills/xero.com/login-za6riz/SKILL.md"
+        });
+        let entry = parse_hermes_entry(&item).expect("entry");
+        assert_eq!(
+            entry.download_url,
+            "https://raw.githubusercontent.com/browserbase/browse.sh/main/skills/xero.com/login-za6riz/SKILL.md"
+        );
+    }
+
+    #[test]
+    fn parse_hermes_entry_passes_through_raw_github_source_url() {
+        let item = json!({
+            "name": "tool",
+            "description": "A tool",
+            "category": "misc",
+            "source": "ClawHub",
+            "sourceUrl": "https://raw.githubusercontent.com/acme/skills/main/misc/tool/SKILL.md"
+        });
+        let entry = parse_hermes_entry(&item).expect("entry");
+        assert_eq!(
+            entry.download_url,
+            "https://raw.githubusercontent.com/acme/skills/main/misc/tool/SKILL.md"
+        );
+    }
+
+    #[test]
+    fn parse_hermes_entry_falls_back_when_source_url_is_a_non_github_landing_page() {
+        // clawhub.ai / skills.sh / lobehub serve HTML pages, not raw markdown —
+        // no URL rewrite can fix those, so we leave the (still-imperfect) Hermes
+        // fallback rather than fetch an HTML page as if it were a SKILL.md.
+        let item = json!({
+            "name": "aso-playbook",
+            "description": "ASO",
+            "category": "marketing",
+            "source": "ClawHub",
+            "sourceUrl": "https://clawhub.ai/skills/aso-playbook"
+        });
+        let entry = parse_hermes_entry(&item).expect("entry");
+        assert_eq!(
+            entry.download_url,
+            "https://raw.githubusercontent.com/NousResearch/hermes-agent/main/skills/marketing/aso-playbook/SKILL.md"
+        );
+    }
+
+    #[test]
+    fn docs_path_takes_precedence_over_source_url() {
+        // Bundled skills (docsPath present) keep their canonical Hermes path even
+        // if a sourceUrl is also present.
+        let item = json!({
+            "name": "apple-notes",
+            "description": "Notes",
+            "category": "apple",
+            "source": "built-in",
+            "docsPath": "bundled/apple/apple-apple-notes",
+            "sourceUrl": "https://github.com/other/repo/blob/main/x/SKILL.md"
+        });
+        let entry = parse_hermes_entry(&item).expect("entry");
+        assert_eq!(
+            entry.download_url,
+            "https://raw.githubusercontent.com/NousResearch/hermes-agent/main/skills/apple/apple-notes/SKILL.md"
+        );
+    }
+
+    #[test]
+    fn normalize_source_url_rejects_blob_url_without_markdown_target() {
+        // A blob URL that does not point at a .md file is not a usable SKILL.md.
+        assert!(normalize_source_url("https://github.com/acme/repo/blob/main/skills/x").is_none());
+        // Bare hosts / tree listings are not files either.
+        assert!(normalize_source_url("https://github.com/acme/repo").is_none());
     }
 
     #[test]
