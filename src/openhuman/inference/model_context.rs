@@ -13,6 +13,23 @@ use crate::openhuman::config::{
 const TIER_LARGE_CONTEXT: u64 = 200_000;
 const TIER_STANDARD_CONTEXT: u64 = 128_000;
 const TIER_LOCAL_CONTEXT: u64 = 8_192;
+
+/// Last-resort context window (tokens) for a **local** provider when neither the
+/// static model table nor the provider profile declares one.
+///
+/// Local runtimes (llama.cpp / vLLM via `LocalProviderKind::LocalOpenai`, whose
+/// profile default is `None`) enforce the model's *loaded* `n_ctx` and reject an
+/// over-budget prompt with a hard `400` (`n_keep >= n_ctx`) — issue #3550 /
+/// Sentry TAURI-RUST-6V0. Returning `None` for those would **disable**
+/// pre-dispatch trimming and let the overflow through. So instead of skipping,
+/// we trim against this conservative floor: a slightly-too-aggressive trim is
+/// strictly better than a guaranteed 400. The value is the smallest real local
+/// profile default (MLX = 4096), chosen because any local runtime can hold at
+/// least this much, while keeping the floor low enough to actually bound the
+/// prompt. Only applied to local providers — cloud providers with an unknown
+/// model keep `None` (their windows are large; a tiny floor would needlessly
+/// truncate legitimate large-context requests).
+const CONSERVATIVE_LOCAL_CONTEXT_FLOOR: u64 = 4_096;
 /// Summarization tier. `summarization-v1` resolves to a long-context flash
 /// model (currently DeepSeek v4 flash, ~1M tokens). `extract_from_result`
 /// uses this window to single-shot whole oversized payloads instead of
@@ -114,6 +131,14 @@ fn tier_context_window(model: &str) -> Option<u64> {
 /// function falls back to the provider profile's declared default context
 /// window. This ensures preflight trimming still works for local models
 /// even when the exact model name isn't in the static pattern table.
+///
+/// For a **local** provider this never returns `None`: if the profile itself
+/// declares no default (e.g. `LocalProviderKind::LocalOpenai` = llama.cpp /
+/// vLLM), it falls back once more to [`CONSERVATIVE_LOCAL_CONTEXT_FLOOR`] so
+/// trimming still engages instead of being silently skipped and overflowing
+/// the runtime `n_ctx` (issue #3550 / Sentry TAURI-RUST-6V0). `None` is only
+/// returned when `local_kind` is `None` (cloud provider, unknown model) —
+/// where over-trimming a large window is worse than skipping the trim.
 pub fn context_window_for_model_with_local_fallback(
     model: &str,
     local_kind: Option<crate::openhuman::inference::local::profile::LocalProviderKind>,
@@ -133,6 +158,17 @@ pub fn context_window_for_model_with_local_fallback(
             );
             return Some(default_ctx);
         }
+        // Local provider with no declared default (llama.cpp / vLLM). Never
+        // return `None` here — that would disable pre-dispatch trimming and let
+        // the prompt overflow the runtime `n_ctx` (the TAURI-RUST-6V0 400). Trim
+        // against a conservative floor instead.
+        tracing::debug!(
+            model,
+            provider = kind.as_str(),
+            context_window = CONSERVATIVE_LOCAL_CONTEXT_FLOOR,
+            "[model_context] local provider has no profile default; using conservative context floor"
+        );
+        return Some(CONSERVATIVE_LOCAL_CONTEXT_FLOOR);
     }
     None
 }
@@ -204,6 +240,17 @@ mod tests {
         assert_eq!(
             context_window_for_model_with_local_fallback("qwen3:14b", None),
             None
+        );
+        // Local provider whose profile declares no default (llama.cpp / vLLM via
+        // LocalOpenai) → conservative floor, NOT None. None here would disable
+        // pre-dispatch trimming and let the prompt overflow the runtime n_ctx
+        // (the TAURI-RUST-6V0 400). Must stay bounded.
+        assert_eq!(
+            context_window_for_model_with_local_fallback(
+                "some-unlisted-gguf",
+                Some(LocalProviderKind::LocalOpenai)
+            ),
+            Some(super::CONSERVATIVE_LOCAL_CONTEXT_FLOOR)
         );
         // Known model ignores local fallback
         assert_eq!(
