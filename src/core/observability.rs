@@ -2746,6 +2746,41 @@ mod tests {
     }
 
     #[test]
+    fn classifies_lmstudio_n_keep_exceeds_n_ctx_rereport() {
+        // TAURI-RUST-6V0: the verbatim LM Studio 400 body — the un-evictable
+        // prefix (`n_keep`) is larger than the model's loaded context
+        // (`n_ctx`). When this 400 slips past the pre-dispatch guard and is
+        // re-raised by the agent/web_channel, `report_error_or_expected` must
+        // classify it as expected user-state so it stays out of Sentry.
+        assert_eq!(
+            expected_error_kind(
+                "lmstudio API error (400 Bad Request): {\"error\":\"The number of tokens to keep from the initial prompt is greater than the context length (n_keep: 10978 >= n_ctx: 8192). Try to load the model with a larger context length, or provide a shorter input.\"}"
+            ),
+            Some(ExpectedErrorKind::ContextWindowExceeded)
+        );
+    }
+
+    #[test]
+    fn context_prefix_too_large_error_display_classifies_as_expected() {
+        // S3.5.d coupling test: the pre-dispatch actionable error's Display
+        // string MUST classify as the suppressed ContextWindowExceeded bucket,
+        // so a wording drift in the user-facing message (which is what gets
+        // re-raised and re-reported up the stack) fails CI instead of silently
+        // leaking the event to Sentry.
+        let err = crate::openhuman::agent::harness::token_budget::ContextPrefixTooLargeError {
+            prefix_tokens: 10_978,
+            context_window: 8_192,
+            max_input_tokens: 7_372,
+        };
+        assert_eq!(
+            expected_error_kind(&err.to_string()),
+            Some(ExpectedErrorKind::ContextWindowExceeded),
+            "ContextPrefixTooLargeError Display must stay coupled to the \
+             context-window-exceeded classifier (drift would leak Sentry events)"
+        );
+    }
+
+    #[test]
     fn does_not_classify_unrelated_messages_as_context_window_exceeded() {
         // Anchors are context-overflow specific. A generic "window" or
         // "context" mention, or an unrelated rate-limit "exceeded", must
