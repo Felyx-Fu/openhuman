@@ -234,6 +234,25 @@ impl Provider for RouterProvider {
             .any(|(_, provider)| provider.supports_vision())
     }
 
+    /// Delegate to the provider that actually handles `model` so local
+    /// runtimes report their runtime-loaded window (LM Studio `n_ctx`) instead
+    /// of the static-table default the trait would otherwise return (#3550 /
+    /// TAURI-RUST-6V0).
+    async fn effective_context_window(&self, model: &str) -> Option<u64> {
+        let (provider_idx, resolved_model) = self.resolve(model);
+        let (_, provider) = &self.providers[provider_idx];
+        provider.effective_context_window(&resolved_model).await
+    }
+
+    /// Delegate to the resolved provider so the engine's pre-dispatch
+    /// un-evictable-prefix guard fires for a routed local model (#3550).
+    fn is_local_provider(&self) -> bool {
+        self.providers
+            .get(self.default_index)
+            .map(|(_, p)| p.is_local_provider())
+            .unwrap_or(false)
+    }
+
     async fn warmup(&self) -> anyhow::Result<()> {
         for (name, provider) in &self.providers {
             tracing::info!(provider = name, "Warming up routed provider");

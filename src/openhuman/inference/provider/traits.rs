@@ -538,6 +538,20 @@ pub trait Provider: Send + Sync {
         crate::openhuman::inference::context_window_for_model(model)
     }
 
+    /// Whether this provider talks to a **local** runtime (LM Studio, Ollama,
+    /// llama.cpp, vLLM, …) rather than a cloud API. Local runtimes enforce the
+    /// model's *runtime-loaded* `n_ctx` and can be loaded with a window smaller
+    /// than the assistant's un-evictable system prefix — the
+    /// `n_keep >= n_ctx` overflow (#3550 / TAURI-RUST-6V0). The agent engine
+    /// uses this to gate its pre-dispatch un-evictable-prefix guard, which
+    /// surfaces an actionable "reload with a larger context length" error only
+    /// for local providers (cloud windows are large enough that the guard would
+    /// only ever fire on a genuine overflow the user can't remedy by reloading).
+    /// Defaults to `false`.
+    fn is_local_provider(&self) -> bool {
+        false
+    }
+
     /// Warm up the HTTP connection pool (TLS handshake, DNS, HTTP/2 setup).
     /// Default implementation is a no-op; providers with HTTP clients should override.
     async fn warmup(&self) -> anyhow::Result<()> {

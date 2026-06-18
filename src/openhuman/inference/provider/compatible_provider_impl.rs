@@ -1257,6 +1257,10 @@ impl Provider for OpenAiCompatibleProvider {
         Ok(())
     }
 
+    fn is_local_provider(&self) -> bool {
+        self.local_provider_kind.is_some()
+    }
+
     /// Resolve the effective context window for pre-dispatch trimming.
     ///
     /// For cloud (non-local) providers this is the static model table. For

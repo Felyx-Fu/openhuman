@@ -450,6 +450,25 @@ impl Provider for ReliableProvider {
         Ok(())
     }
 
+    /// Delegate to the primary provider so a wrapped local runtime reports its
+    /// runtime-loaded window (LM Studio `n_ctx`) for pre-dispatch trimming
+    /// instead of the static-table default (#3550 / TAURI-RUST-6V0).
+    async fn effective_context_window(&self, model: &str) -> Option<u64> {
+        match self.providers.first() {
+            Some((_, provider)) => provider.effective_context_window(model).await,
+            None => crate::openhuman::inference::context_window_for_model(model),
+        }
+    }
+
+    /// Delegate to the primary provider so the engine's pre-dispatch
+    /// un-evictable-prefix guard fires for a wrapped local model (#3550).
+    fn is_local_provider(&self) -> bool {
+        self.providers
+            .first()
+            .map(|(_, p)| p.is_local_provider())
+            .unwrap_or(false)
+    }
+
     async fn chat_with_system(
         &self,
         system_prompt: Option<&str>,
