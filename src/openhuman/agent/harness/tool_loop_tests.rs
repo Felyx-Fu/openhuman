@@ -109,6 +109,35 @@ impl Tool for ErrorResultTool {
     }
 }
 
+/// Simulates a delegated sub-agent (`run_code` / `tools_agent`) whose provider
+/// call hit a permanent, non-retryable wall: `dispatch_subagent` converts that
+/// sub-agent `Err` into a `ToolResult::error` carrying the budget-exhaustion
+/// body. Used to prove the #3104 cascade halts on the FIRST such failure.
+struct BudgetExhaustedDelegationTool;
+
+#[async_trait]
+impl Tool for BudgetExhaustedDelegationTool {
+    fn name(&self) -> &str {
+        "run_code"
+    }
+
+    fn description(&self) -> &str {
+        "delegate to the code executor (always 400s on budget here)"
+    }
+
+    fn parameters_schema(&self) -> serde_json::Value {
+        serde_json::json!({"type":"object"})
+    }
+
+    async fn execute(&self, _args: serde_json::Value) -> Result<ToolResult> {
+        // Mirrors dispatch.rs::format_subagent_failure wrapping the upstream body.
+        Ok(ToolResult::error(
+            "run_code failed and did not complete — no work was performed. \
+             Error: OpenHuman API error (400): {\"error\":\"Insufficient budget\"}",
+        ))
+    }
+}
+
 struct FailingTool;
 
 #[async_trait]
@@ -1071,6 +1100,71 @@ async fn run_tool_call_loop_halts_when_no_progress() {
     );
 }
 
+/// #3104 end-to-end repro through the real engine: a delegation that fails with
+/// a PERMANENT inference condition (out of budget) must halt the orchestrator on
+/// the FIRST failure with an actionable root cause — NOT grind to the
+/// 6-consecutive no-progress backstop (the Plan → Run Code ×6 → Tools Agent ×2
+/// cascade the user saw). Before the fix this loop consumed 6 LLM turns and
+/// ended in a generic message; after it, exactly 1.
+#[tokio::test]
+async fn run_tool_call_loop_halts_on_first_budget_exhausted_delegation() {
+    let mut responses = Vec::new();
+    for i in 0..10 {
+        // Varied args so the per-signature repeat guard can NEVER trip — only the
+        // terminal-inference check (or, pre-fix, the 6-consecutive backstop) can.
+        responses.push(Ok(ChatResponse {
+            text: Some(format!(
+                "<tool_call>{{\"name\":\"run_code\",\"arguments\":{{\"step\":{i}}}}}</tool_call>"
+            )),
+            tool_calls: vec![],
+            usage: None,
+            reasoning_content: None,
+        }));
+    }
+    let provider = ScriptedProvider {
+        responses: Mutex::new(responses),
+        native_tools: false,
+        vision: false,
+    };
+    let mut history = vec![ChatMessage::user("build me a dashboard")];
+    let tools: Vec<Box<dyn Tool>> = vec![Box::new(BudgetExhaustedDelegationTool)];
+
+    let result = run_tool_call_loop(
+        &provider,
+        &mut history,
+        &tools,
+        "test-provider",
+        "model",
+        0.0,
+        true,
+        "channel",
+        &crate::openhuman::config::MultimodalConfig::default(),
+        &crate::openhuman::config::MultimodalFileConfig::default(),
+        10, // max_iterations — must NOT be reached; terminal halt fires at 1
+        None,
+        None,
+        &[],
+        None,
+        None,
+        &crate::openhuman::tools::policy::DefaultToolPolicy,
+    )
+    .await
+    .expect("budget-exhausted halt returns Ok with an actionable summary");
+
+    assert!(
+        result.contains("Stopping") && result.contains("out of inference budget"),
+        "expected an actionable budget halt, got: {result}"
+    );
+    // The decisive assertion: only the FIRST scripted turn was consumed (9 of 10
+    // remain). Proves the cascade is killed on the first permanent failure
+    // instead of burning 6 doomed, paid delegations.
+    assert_eq!(
+        provider.responses.lock().len(),
+        9,
+        "loop must halt after exactly 1 turn on a permanent inference failure"
+    );
+}
+
 // -- RepeatFailureGuard (shared by run_tool_call_loop + run_inner_loop) --------
 
 #[test]
@@ -1194,6 +1288,117 @@ fn hard_reject_distinct_args_do_not_trip_repeat() {
         g.record("file_read", "/etc/x5", false, &format!("{mk} blocked"))
             .is_some(),
         "6 distinct hard rejects in a row should still trip the no-progress guard"
+    );
+}
+
+// -- Terminal inference failures (#3104: budget / provider-config cascade) -------
+
+#[test]
+fn terminal_inference_failure_kind_classifies_budget_and_config() {
+    // Budget wins precedence; provider-config covers the user-state model/key
+    // rejections; transient / 5xx / generic-4xx match NEITHER (so retryable
+    // failures keep their normal consecutive-failure grace).
+    assert_eq!(
+        terminal_inference_failure_kind(
+            "run_code failed and did not complete. Error: OpenHuman API error (400): \
+             {\"error\":\"insufficient budget — add credits\"}"
+        ),
+        Some(TerminalInferenceFailure::BudgetExhausted)
+    );
+    assert_eq!(
+        terminal_inference_failure_kind(
+            "tools_agent failed and did not complete. Error: ollama API error (400 Bad Request): \
+             {\"error\":{\"message\":\"\\\"bge-m3:latest\\\" does not support chat\"}}"
+        ),
+        Some(TerminalInferenceFailure::ProviderConfig)
+    );
+    for transient in [
+        "Error: connection reset by peer",
+        "Error: 503 Service Unavailable",
+        "Error: rate limit exceeded, retry after 1s",
+        "run_code failed and did not complete. Error: timed out",
+    ] {
+        assert_eq!(
+            terminal_inference_failure_kind(transient),
+            None,
+            "{transient:?} must NOT classify as a terminal inference failure"
+        );
+    }
+}
+
+#[test]
+fn terminal_budget_failure_halts_on_first_occurrence() {
+    let mut g = RepeatFailureGuard::new();
+    let budget = "run_code failed and did not complete — no work was performed. \
+                  Error: OpenHuman API error (400): {\"error\":\"Insufficient budget\"}";
+    let halt = g.record("run_code", "{\"prompt\":\"write a file\"}", false, budget);
+    assert!(
+        halt.is_some(),
+        "a budget-exhausted delegation must halt on the FIRST failure, not grind to 6"
+    );
+    let msg = halt.unwrap();
+    assert!(msg.contains("out of inference budget"), "got: {msg}");
+    assert!(msg.contains("`run_code`"), "names the failing step: {msg}");
+}
+
+#[test]
+fn terminal_config_rejection_halts_on_first_occurrence() {
+    let mut g = RepeatFailureGuard::new();
+    let cfg = "tools_agent failed and did not complete. Error: OpenHuman API error \
+               (400 Bad Request): Model 'gpt-5.5' is not available. Use GET \
+               /openai/v1/models to list available models.";
+    let halt = g.record("tools_agent", "{\"prompt\":\"do the thing\"}", false, cfg);
+    assert!(
+        halt.is_some(),
+        "a provider-config rejection must halt on the FIRST failure"
+    );
+    let msg = halt.unwrap();
+    assert!(msg.contains("rejected the request"), "got: {msg}");
+    assert!(
+        msg.contains("Settings → AI"),
+        "actionable remediation: {msg}"
+    );
+}
+
+#[test]
+fn terminal_failure_halts_first_even_across_varied_delegation_tools() {
+    // The #3104 cascade reproduction at the guard level: the orchestrator
+    // re-emits a doomed step under VARIED tool names (plan → run_code →
+    // tools_agent), so neither the identical-(tool,args) repeat guard nor the
+    // 6-consecutive no-progress guard would catch it in time. The terminal
+    // classifier must halt on the very first permanent failure regardless of
+    // which delegation tool surfaced it.
+    let mut g = RepeatFailureGuard::new();
+    let budget = "Error: {\"error\":\"insufficient balance\"}";
+    let halt = g.record("plan", "{\"goal\":\"x\"}", false, budget);
+    assert!(
+        halt.is_some(),
+        "first permanent failure under ANY delegation tool must halt immediately"
+    );
+}
+
+#[test]
+fn terminal_classifier_does_not_short_circuit_transient_grace() {
+    // A genuinely transient (retryable) failure must still flow through the
+    // existing no-progress backstop — proving the terminal halt is additive,
+    // not a blanket "halt on first failure" regression.
+    let mut g = RepeatFailureGuard::new();
+    for i in 0..5 {
+        assert!(
+            g.record(
+                "run_code",
+                &format!("attempt{i}"),
+                false,
+                "Error: timed out"
+            )
+            .is_none(),
+            "transient failures must NOT halt before the 6-consecutive threshold"
+        );
+    }
+    assert!(
+        g.record("run_code", "attempt5", false, "Error: timed out")
+            .is_some(),
+        "6 consecutive transient failures still trip the no-progress guard"
     );
 }
 
