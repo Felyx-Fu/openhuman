@@ -28,6 +28,7 @@ use crate::openhuman::config::{MultimodalConfig, MultimodalFileConfig};
 use crate::openhuman::context::EngineAutocompact;
 use crate::openhuman::inference::provider::{ChatResponse, ToolCall, UsageInfo};
 use async_trait::async_trait;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Mutex;
 
 /// Provider that replays a queue of `chat()` responses and records every
@@ -103,6 +104,51 @@ impl Provider for CompactionProvider {
     /// static table ever learned the test's model id).
     async fn effective_context_window(&self, _model: &str) -> Option<u64> {
         None
+    }
+}
+
+struct PrefixGuardProvider {
+    chat_calls: AtomicUsize,
+    context_window: u64,
+}
+
+#[async_trait]
+impl Provider for PrefixGuardProvider {
+    async fn chat_with_system(
+        &self,
+        _system: Option<&str>,
+        _message: &str,
+        _model: &str,
+        _temperature: f64,
+    ) -> anyhow::Result<String> {
+        Ok("noop".into())
+    }
+
+    async fn chat(
+        &self,
+        _request: ChatRequest<'_>,
+        _model: &str,
+        _temperature: f64,
+    ) -> anyhow::Result<ChatResponse> {
+        self.chat_calls.fetch_add(1, Ordering::SeqCst);
+        Ok(ChatResponse {
+            text: Some("SHOULD-NOT-DISPATCH".into()),
+            tool_calls: vec![],
+            usage: None,
+            reasoning_content: None,
+        })
+    }
+
+    async fn effective_context_window(&self, _model: &str) -> Option<u64> {
+        Some(self.context_window)
+    }
+
+    async fn local_prefix_guard_context_window(&self, _model: &str) -> Option<u64> {
+        Some(self.context_window)
+    }
+
+    fn is_local_provider(&self) -> bool {
+        true
     }
 }
 
@@ -184,6 +230,17 @@ async fn run(
     history: &mut Vec<ChatMessage>,
     autocompact: Option<&EngineAutocompact>,
 ) -> TurnEngineOutcome {
+    run_result(provider, history, autocompact)
+        .await
+        .expect("turn engine should complete")
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn run_result(
+    provider: &dyn Provider,
+    history: &mut Vec<ChatMessage>,
+    autocompact: Option<&EngineAutocompact>,
+) -> anyhow::Result<TurnEngineOutcome> {
     let mut tool_source = NoopToolSource { specs: Vec::new() };
     let progress = NullProgress;
     let mut observer = NullObserver;
@@ -216,7 +273,6 @@ async fn run(
         autocompact,
     )
     .await
-    .expect("turn engine should complete")
 }
 
 #[tokio::test]
@@ -285,5 +341,36 @@ async fn engine_does_not_autocompact_when_opted_out() {
             .iter()
             .any(|m| m.content.contains("END OF CONTEXT SUMMARY")),
         "no summary message should be inserted when opted out"
+    );
+}
+
+#[tokio::test]
+async fn local_prefix_guard_runs_before_trim_can_drop_newest_turn() {
+    let provider = PrefixGuardProvider {
+        chat_calls: AtomicUsize::new(0),
+        context_window: 4_096,
+    };
+    let mut history = vec![
+        ChatMessage::system("short system"),
+        // Single newest turn is larger than n_ctx. If the hard guard runs only
+        // after token-budget trimming, the trimmer can drop this turn and mask
+        // the overflow by dispatching a context-free system-only prompt.
+        ChatMessage::user("u".repeat(20_000)),
+    ];
+
+    let err = match run_result(&provider, &mut history, None).await {
+        Ok(_) => panic!("local prefix overflow should abort before dispatch"),
+        Err(err) => err,
+    };
+    let msg = err.to_string();
+
+    assert!(
+        msg.contains("n_keep >= n_ctx"),
+        "expected actionable local context error, got: {msg}"
+    );
+    assert_eq!(
+        provider.chat_calls.load(Ordering::SeqCst),
+        0,
+        "provider chat must not be dispatched after prefix overflow"
     );
 }
