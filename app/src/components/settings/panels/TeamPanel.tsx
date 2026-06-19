@@ -16,6 +16,24 @@ import { useSettingsNavigation } from '../hooks/useSettingsNavigation';
 
 const log = debug('core-rpc:error');
 
+/**
+ * Surface the real failure text to the user.
+ *
+ * `callCoreRpc` rejects with a {@link CoreRpcError}, whose useful message is on
+ * `.message`. The previous `'error' in err` check never matched that shape, so
+ * every team operation collapsed to a generic banner ("Failed to create team")
+ * and hid the real cause — e.g. a 401 `SESSION_EXPIRED: … POST /teams` or a
+ * backend "team limit reached". See #3723.
+ */
+function teamErrorMessage(err: unknown, fallback: string): string {
+  if (err instanceof CoreRpcError) return err.message || fallback;
+  if (err && typeof err === 'object' && 'error' in err) {
+    return String((err as { error: unknown }).error);
+  }
+  if (err instanceof Error && err.message) return err.message;
+  return fallback;
+}
+
 const TeamPanel = () => {
   const { t } = useT();
   const { navigateBack, navigateToTeamManagement } = useSettingsNavigation();
@@ -71,11 +89,7 @@ const TeamPanel = () => {
       setNewTeamName('');
       await refreshTeamsWithLoading();
     } catch (err) {
-      setError(
-        err && typeof err === 'object' && 'error' in err
-          ? String(err.error)
-          : t('team.failedToCreate')
-      );
+      setError(teamErrorMessage(err, t('team.failedToCreate')));
     } finally {
       setIsCreating(false);
     }
@@ -91,11 +105,7 @@ const TeamPanel = () => {
       setJoinCode('');
       await Promise.all([refresh(), refreshTeamsWithLoading()]);
     } catch (err) {
-      setError(
-        err && typeof err === 'object' && 'error' in err
-          ? String(err.error)
-          : t('team.invalidInviteCode')
-      );
+      setError(teamErrorMessage(err, t('team.invalidInviteCode')));
     } finally {
       setIsJoining(false);
     }
@@ -109,11 +119,7 @@ const TeamPanel = () => {
       await teamApi.switchTeam(teamId);
       await Promise.all([refresh(), refreshTeamsWithLoading()]);
     } catch (err) {
-      setError(
-        err && typeof err === 'object' && 'error' in err
-          ? String(err.error)
-          : t('team.failedToSwitch')
-      );
+      setError(teamErrorMessage(err, t('team.failedToSwitch')));
     } finally {
       setIsSwitching(null);
     }
@@ -134,11 +140,7 @@ const TeamPanel = () => {
       await Promise.all([refresh(), refreshTeamsWithLoading()]);
       setTeamToLeave(null);
     } catch (err) {
-      setError(
-        err && typeof err === 'object' && 'error' in err
-          ? String(err.error)
-          : t('team.failedToLeave')
-      );
+      setError(teamErrorMessage(err, t('team.failedToLeave')));
     } finally {
       setIsLeaving(null);
     }
