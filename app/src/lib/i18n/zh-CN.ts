@@ -2295,11 +2295,14 @@ const messages: TranslationMap = {
   'bootCheck.tokenRequired': '请输入核心认证令牌。',
   'bootCheck.httpPublicWarning':
     '这是公网主机上的纯 HTTP 地址——流量不会被加密。除非你信任该网络，否则请使用 HTTPS。',
+  'bootCheck.heroTitle': '欢迎使用 OpenHuman',
+  'bootCheck.heroDesktopDesc': '你的私人 AI 超级智能。私密、简单、强大。',
+  'bootCheck.heroWebDesc': '连接到你的运行时以开始使用。输入 URL 和认证令牌，或下载桌面应用。',
   'bootCheck.chooseCoreMode': '选择核心模式',
   'bootCheck.connectToCore': '连接到你的核心',
   'bootCheck.desktopDescription': 'OpenHuman 需要一个运行中的核心才能工作。请选择连接方式。',
   'bootCheck.webDescription':
-    '网页版 OpenHuman 连接到由你控制的远程核心。请输入其 URL 和认证令牌，或安装桌面版在本地运行核心。',
+    '在 Web 上，OpenHuman 连接到一个由你控制的运行时。在下方输入 URL 和认证令牌，或下载桌面应用在你的设备上运行一个。',
   'bootCheck.preferDesktop': '更希望在自己的设备上运行一切？',
   'bootCheck.downloadDesktop': '下载桌面应用',
   'bootCheck.localRecommended': '本地（推荐）',
@@ -4615,6 +4618,38 @@ const messages: TranslationMap = {
   'walkthrough.tooltip.next': '下一步 →',
   'walkthrough.tooltip.skip': '跳过引导',
   'walkthrough.tooltip.stepCounter': '{n} / {total}',
+  // Walkthrough product tour steps — narrative-driven onboarding guide
+  'walkthrough.steps.welcome.title': '欢迎使用 OpenHuman',
+  'walkthrough.steps.welcome.content':
+    '让我们快速了解一下你的新 AI 助手。只需几步就能掌握核心功能。',
+  'walkthrough.steps.commandCenter.title': '你的指挥中心',
+  'walkthrough.steps.commandCenter.content':
+    '这是你的主页 — 快速了解正在发生的事情以及需要你关注的内容。',
+  'walkthrough.steps.startChat.title': '开始对话',
+  'walkthrough.steps.startChat.content': '随时点击这里与你的 AI 对话。提问、头脑风暴或完成任务。',
+  'walkthrough.steps.aiAtWork.title': 'AI 工作区',
+  'walkthrough.steps.aiAtWork.content':
+    '对话在这里进行。你的助手可以搜索网页、运行工具，并在不同对话间记住上下文。',
+  'walkthrough.steps.connectTools.title': '连接工具增强能力',
+  'walkthrough.steps.connectTools.content':
+    '连接 Gmail、Slack、WhatsApp 等。每个连接都为你的助手带来新的能力。',
+  'walkthrough.steps.chatAnywhere.title': '随时随地聊天',
+  'walkthrough.steps.chatAnywhere.content':
+    'WhatsApp、Telegram、Slack、Discord — 连接你的消息应用，让助手随时随地找到你。',
+  'walkthrough.steps.aiBrain.title': 'AI 的大脑',
+  'walkthrough.steps.aiBrain.content':
+    '这里是你的助手学习和记忆的地方。使用越多越聪明 — 记忆、上下文和智能都在这里。',
+  'walkthrough.steps.customize.title': '个性化设置',
+  'walkthrough.steps.customize.content':
+    '偏好设置、隐私、通知 — 一切都在这里。你可以随时从设置中重新开始此引导。',
+  'walkthrough.steps.quickAccess.title': '快速访问',
+  'walkthrough.steps.quickAccess.content':
+    '这些标签是你的快捷方式 — 聊天、技能和智能始终一键可达。',
+  'walkthrough.steps.stayInformed.title': '保持信息同步',
+  'walkthrough.steps.stayInformed.content': '提醒和自动化在这里 — 简报、通知和后台活动。',
+  'walkthrough.steps.allSet.title': '一切就绪！',
+  'walkthrough.steps.allSet.content':
+    '你的助手给你留了一条欢迎消息 — 这是你的空间，可以聊天、提问或头脑风暴。玩得开心！',
   'webhooks.activity.empty': '暂无活动',
   'webhooks.activity.title': '最近活动',
   'webhooks.composioHistory.empty': '暂无记录',
