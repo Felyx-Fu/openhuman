@@ -138,6 +138,33 @@ impl Tool for BudgetExhaustedDelegationTool {
     }
 }
 
+/// Records whether it ever executed. Used to prove that a tool placed AFTER a
+/// terminal-inference failure in the SAME assistant-message batch never runs
+/// (#3104 — Codex review #3779, batched tool calls).
+struct RanTrackerTool {
+    ran: std::sync::Arc<std::sync::atomic::AtomicBool>,
+}
+
+#[async_trait]
+impl Tool for RanTrackerTool {
+    fn name(&self) -> &str {
+        "ran_tracker"
+    }
+
+    fn description(&self) -> &str {
+        "records that it executed"
+    }
+
+    fn parameters_schema(&self) -> serde_json::Value {
+        serde_json::json!({"type":"object"})
+    }
+
+    async fn execute(&self, _args: serde_json::Value) -> Result<ToolResult> {
+        self.ran.store(true, std::sync::atomic::Ordering::SeqCst);
+        Ok(ToolResult::success("ran-tracker-out"))
+    }
+}
+
 struct FailingTool;
 
 #[async_trait]
@@ -1165,6 +1192,83 @@ async fn run_tool_call_loop_halts_on_first_budget_exhausted_delegation() {
     );
 }
 
+/// #3104 batched-tool-call guarantee (Codex review #3779): when a single
+/// assistant message emits MULTIPLE tool calls and the FIRST records a terminal
+/// inference failure (out of budget / provider-config), the loop must STOP
+/// executing the rest of the batch — so a second delegated call in the same
+/// message can never launch a paid sub-agent after the first proved the wall is
+/// unrecoverable. Pre-fix the loop set `halt_reason` but drained the batch first.
+#[tokio::test]
+async fn run_tool_call_loop_stops_batch_after_first_terminal_failure() {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::Arc;
+
+    // One assistant message with TWO tool calls: the budget-exhausted delegation
+    // first, a tracker second. Native mode emits both as `tool_calls` in a single
+    // ChatResponse so they share one batch iteration.
+    let provider = ScriptedProvider {
+        responses: Mutex::new(vec![Ok(ChatResponse {
+            text: Some(String::new()),
+            tool_calls: vec![
+                crate::openhuman::inference::provider::ToolCall {
+                    id: "call-budget".into(),
+                    name: "run_code".into(),
+                    arguments: "{}".into(),
+                    extra_content: None,
+                },
+                crate::openhuman::inference::provider::ToolCall {
+                    id: "call-tracker".into(),
+                    name: "ran_tracker".into(),
+                    arguments: "{}".into(),
+                    extra_content: None,
+                },
+            ],
+            usage: None,
+            reasoning_content: None,
+        })]),
+        native_tools: true,
+        vision: false,
+    };
+    let mut history = vec![ChatMessage::user("build me a dashboard")];
+    let ran = Arc::new(AtomicBool::new(false));
+    let tools: Vec<Box<dyn Tool>> = vec![
+        Box::new(BudgetExhaustedDelegationTool),
+        Box::new(RanTrackerTool { ran: ran.clone() }),
+    ];
+
+    let result = run_tool_call_loop(
+        &provider,
+        &mut history,
+        &tools,
+        "test-provider",
+        "model",
+        0.0,
+        true,
+        "channel",
+        &crate::openhuman::config::MultimodalConfig::default(),
+        &crate::openhuman::config::MultimodalFileConfig::default(),
+        5,
+        None,
+        None,
+        &[],
+        None,
+        None,
+        &crate::openhuman::tools::policy::DefaultToolPolicy,
+    )
+    .await
+    .expect("budget-exhausted halt returns Ok with an actionable summary");
+
+    assert!(
+        result.contains("Stopping") && result.contains("out of inference budget"),
+        "expected an actionable budget halt, got: {result}"
+    );
+    // The decisive assertion: the SECOND call in the batch must NOT have run.
+    assert!(
+        !ran.load(Ordering::SeqCst),
+        "a tool placed after a terminal inference failure in the same batch must NOT execute"
+    );
+}
+
 // -- RepeatFailureGuard (shared by run_tool_call_loop + run_inner_loop) --------
 
 #[test]
@@ -1327,6 +1431,68 @@ fn terminal_inference_failure_kind_classifies_budget_and_config() {
 }
 
 #[test]
+fn terminal_inference_failure_requires_delegated_inference_envelope() {
+    // Codex review #3779: the message-only provider classifiers match short
+    // substrings (`invalid temperature`, `model field is required`,
+    // `insufficient balance`, …) that can legitimately appear in a RECOVERABLE
+    // tool's stderr. Those must NOT trip the terminal halt — only a result that
+    // carries a delegated-inference/provider envelope may.
+
+    // 1) Recoverable `shell`/`run_code` SCRIPT stderr that merely *contains* a
+    //    classifier substring — no provider envelope → must NOT classify, so the
+    //    normal consecutive-failure grace still applies and the script can be
+    //    retried/fixed.
+    for recoverable in [
+        // A Python test raising on a `temperature` arg — not an inference call.
+        "ValueError: invalid temperature: only 1 is allowed for this model",
+        // A user script validating config and printing the provider-ish phrase.
+        "AssertionError: model field is required",
+        // A finance script echoing an account-balance string.
+        "RuntimeError: insufficient balance in wallet 0xabc",
+        // A test asserting on the literal remediation copy.
+        "FAILED test_models.py::test_unknown - assert 'model_not_found' in resp",
+    ] {
+        assert_eq!(
+            terminal_inference_failure_kind(recoverable),
+            None,
+            "recoverable tool stderr without an inference envelope must NOT classify \
+             as a terminal inference failure: {recoverable:?}"
+        );
+    }
+
+    // 2) The SAME phrases, but now wrapped in a genuine delegated-inference
+    //    envelope (provider HTTP error / reliable rollup / sub-agent dispatch
+    //    wrapper) → MUST classify, because these only come from a delegated
+    //    provider round-trip.
+    assert_eq!(
+        terminal_inference_failure_kind(
+            "run_code failed and did not complete. Error: custom_openai API error \
+             (400 Bad Request): {\"error\":{\"message\":\"invalid temperature: only 1 is \
+             allowed for this model\"}}"
+        ),
+        Some(TerminalInferenceFailure::ProviderConfig),
+        "a delegated provider config-rejection (with envelope) must classify"
+    );
+    assert_eq!(
+        terminal_inference_failure_kind(
+            "tools_agent failed and did not complete. Error: OpenHuman API error (402): \
+             {\"error\":\"Insufficient balance\"}"
+        ),
+        Some(TerminalInferenceFailure::BudgetExhausted),
+        "a delegated budget-exhaustion (with envelope) must classify"
+    );
+    // The reliable-chain rollup envelope (no `API error` token) also qualifies.
+    assert_eq!(
+        terminal_inference_failure_kind(
+            "All providers/models failed. Attempts:\n provider=custom_openai model=gpt-5.5 \
+             attempt 1/3: non_retryable; error=insufficient balance"
+        ),
+        Some(TerminalInferenceFailure::BudgetExhausted),
+        "a reliable-chain exhaustion rollup carrying a budget body must classify"
+    );
+}
+
+#[test]
 fn terminal_budget_failure_halts_on_first_occurrence() {
     let mut g = RepeatFailureGuard::new();
     let budget = "run_code failed and did not complete — no work was performed. \
@@ -1369,7 +1535,10 @@ fn terminal_failure_halts_first_even_across_varied_delegation_tools() {
     // classifier must halt on the very first permanent failure regardless of
     // which delegation tool surfaced it.
     let mut g = RepeatFailureGuard::new();
-    let budget = "Error: {\"error\":\"insufficient balance\"}";
+    // Carries the sub-agent dispatch envelope (`failed and did not complete`)
+    // so it is recognised as a *delegated* inference failure, not arbitrary
+    // tool stderr — see `has_inference_failure_envelope`.
+    let budget = "plan failed and did not complete. Error: {\"error\":\"insufficient balance\"}";
     let halt = g.record("plan", "{\"goal\":\"x\"}", false, budget);
     assert!(
         halt.is_some(),

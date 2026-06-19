@@ -87,13 +87,69 @@ pub(crate) enum TerminalInferenceFailure {
     ProviderConfig,
 }
 
+/// Inference/delegation **envelope** markers that prove a tool result came from
+/// a delegated inference call (a sub-agent / provider round-trip) rather than
+/// from arbitrary tool stderr.
+///
+/// The two provider classifiers ([`is_budget_exhausted_message`] /
+/// [`is_provider_config_rejection_message`]) match on short message substrings
+/// (`"insufficient balance"`, `"invalid temperature"`, `"model field is
+/// required"`, …) that can legitimately appear in a *recoverable* tool's output
+/// — e.g. a `shell`/`run_code` script printing `ValueError: invalid temperature`
+/// or a test asserting on `"model field is required"`. Applying the terminal
+/// halt to those would misreport a fixable script failure as "fix the model or
+/// API key" and stop after a single attempt.
+///
+/// Gating on these envelope markers scopes the classifier to genuinely
+/// delegated inference failures, every one of which surfaces wrapped in one of:
+///   * a provider HTTP-error envelope (`"<provider> API error (…)"`,
+///     `"<provider> Responses API error: …"`, `"<provider> streaming API error
+///     (…)"`) — all contain the `"api error"` substring,
+///   * the reliable-chain exhaustion rollup (`"All providers/models failed"` /
+///     `"may not be available on your provider"`),
+///   * the sub-agent dispatch wrapper (`"failed and did not complete"`, see
+///     [`crate::openhuman::agent_orchestration::tools::dispatch`]).
+///
+/// [`is_budget_exhausted_message`]: crate::openhuman::inference::provider::is_budget_exhausted_message
+/// [`is_provider_config_rejection_message`]: crate::openhuman::inference::provider::is_provider_config_rejection_message
+const INFERENCE_FAILURE_ENVELOPE_MARKERS: &[&str] = &[
+    // Provider HTTP/Responses/streaming error envelopes from the inference
+    // layer (compatible_provider_impl.rs / compatible_helpers.rs / error_code.rs).
+    "api error",
+    // Reliable-chain exhaustion rollup (reliable.rs::format_failure_aggregate).
+    "all providers/models failed",
+    "may not be available on your provider",
+    // Sub-agent delegation failure wrapper (dispatch.rs::format_subagent_failure).
+    "failed and did not complete",
+];
+
+/// True if `result` carries one of the inference/delegation envelope markers —
+/// i.e. the failure demonstrably came from a delegated provider round-trip, not
+/// from an arbitrary tool's stderr. See [`INFERENCE_FAILURE_ENVELOPE_MARKERS`].
+fn has_inference_failure_envelope(result: &str) -> bool {
+    let lower = result.to_ascii_lowercase();
+    INFERENCE_FAILURE_ENVELOPE_MARKERS
+        .iter()
+        .any(|marker| lower.contains(marker))
+}
+
 /// Recognize a permanent (non-retryable) inference failure from a tool result.
 ///
-/// Reuses the two deliberately-tight provider classifiers so this stays in
-/// lockstep with the Sentry-demotion phrase sets: a transient / 5xx / generic
-/// 4xx body matches NEITHER, so genuinely retryable failures still get the
-/// normal consecutive-failure grace ([`NO_PROGRESS_FAILURE_THRESHOLD`]) and are
-/// never halted early. Budget takes precedence if both somehow match.
+/// Two-stage gate so a *recoverable* tool failure can't be misclassified:
+///   1. The result must carry a delegated-inference **envelope**
+///      ([`has_inference_failure_envelope`]) — proving it came from a sub-agent
+///      / provider round-trip and not from arbitrary tool stderr that merely
+///      happens to contain a classifier substring (e.g. a `shell` script
+///      printing `ValueError: invalid temperature` or a test asserting on
+///      `"model field is required"`). Without this guard a fixable script/test
+///      failure would be misreported as "fix the model or API key" and stopped
+///      after a single attempt (Codex review #3779).
+///   2. The (then-trusted) body is matched against the two deliberately-tight
+///      provider classifiers, which stay in lockstep with the Sentry-demotion
+///      phrase sets: a transient / 5xx / generic 4xx body matches NEITHER, so
+///      genuinely retryable failures still get the normal consecutive-failure
+///      grace ([`NO_PROGRESS_FAILURE_THRESHOLD`]) and are never halted early.
+///      Budget takes precedence if both somehow match.
 ///
 /// The orchestrator otherwise re-emits a failed delegation under *varied* tool
 /// names (Plan → `run_code` → `tools_agent`), so the identical-`(tool,args)`
@@ -105,6 +161,11 @@ pub(crate) fn terminal_inference_failure_kind(result: &str) -> Option<TerminalIn
     use crate::openhuman::inference::provider::{
         is_budget_exhausted_message, is_provider_config_rejection_message,
     };
+    // Require the delegated-inference envelope first: the message-only
+    // classifiers are too broad to apply to arbitrary tool stderr.
+    if !has_inference_failure_envelope(result) {
+        return None;
+    }
     if is_budget_exhausted_message(result) {
         Some(TerminalInferenceFailure::BudgetExhausted)
     } else if is_provider_config_rejection_message(result) {
