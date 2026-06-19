@@ -650,7 +650,8 @@ const messages: TranslationMap = {
   'onboarding.welcomeDesc':
     'Twój superinteligentny asystent AI uruchomiony na Twoim komputerze. Prywatny, prosty i niezwykle potężny.',
   'onboarding.welcome.heroTitle': 'Twoje centrum AI do pracy i życia',
-  'onboarding.welcome.heroSubtitle': 'OpenHuman łączy Twoje narzędzia, automatyzuje zadania i dostarcza wyniki — wszystko z Twojego pulpitu.',
+  'onboarding.welcome.heroSubtitle':
+    'OpenHuman łączy Twoje narzędzia, automatyzuje zadania i dostarcza wyniki — wszystko z Twojego pulpitu.',
   'onboarding.context': 'Zbieranie kontekstu',
   'onboarding.contextDesc': 'Połącz narzędzia i usługi, z których korzystasz na co dzień.',
   'onboarding.localAI': 'Lokalne AI',
@@ -2439,8 +2440,10 @@ const messages: TranslationMap = {
   'bootCheck.httpPublicWarning':
     'To zwykły adres HTTP na publicznym hoście — ruch nie będzie szyfrowany. Użyj HTTPS, chyba że ufasz tej sieci.',
   'bootCheck.heroTitle': 'Witamy w OpenHuman',
-  'bootCheck.heroDesktopDesc': 'Twoja osobista superinteligencja AI. Prywatna, prosta i niezwykle potężna.',
-  'bootCheck.heroWebDesc': 'Połącz się ze swoim środowiskiem uruchomieniowym, aby rozpocząć. Wprowadź jego URL i token uwierzytelniający poniżej lub pobierz aplikację desktopową.',
+  'bootCheck.heroDesktopDesc':
+    'Twoja osobista superinteligencja AI. Prywatna, prosta i niezwykle potężna.',
+  'bootCheck.heroWebDesc':
+    'Połącz się ze swoim środowiskiem uruchomieniowym, aby rozpocząć. Wprowadź jego URL i token uwierzytelniający poniżej lub pobierz aplikację desktopową.',
   'bootCheck.chooseCoreMode': 'Wybierz środowisko',
   'bootCheck.connectToCore': 'Połącz się ze swoim środowiskiem',
   'bootCheck.desktopDescription':
@@ -4935,39 +4938,56 @@ const messages: TranslationMap = {
   'walkthrough.tooltip.skip': 'Pomiń przewodnik',
   'walkthrough.tooltip.stepCounter': '{n} z {total}',
   'onboarding.welcome.inputTitle': 'Połącz',
-  'onboarding.welcome.inputDesc': 'Połącz swoje narzędzia, konta i usługi. Wszystko płynie do jednego miejsca.',
+  'onboarding.welcome.inputDesc':
+    'Połącz swoje narzędzia, konta i usługi. Wszystko płynie do jednego miejsca.',
   'onboarding.welcome.hubTitle': 'Automatyzuj',
-  'onboarding.welcome.hubDesc': 'Twój asystent pracuje w Twoim połączonym świecie — zarządza, organizuje i wykonuje.',
+  'onboarding.welcome.hubDesc':
+    'Twój asystent pracuje w Twoim połączonym świecie — zarządza, organizuje i wykonuje.',
   'onboarding.welcome.outputTitle': 'Dostarcz',
-  'onboarding.welcome.outputDesc': 'Otrzymuj podsumowania, ukończone zadania i spostrzeżenia dostarczane dokładnie tam, gdzie ich potrzebujesz.',
+  'onboarding.welcome.outputDesc':
+    'Otrzymuj podsumowania, ukończone zadania i spostrzeżenia dostarczane dokładnie tam, gdzie ich potrzebujesz.',
   'onboarding.welcome.capability1Title': 'Zarządzaj pracą',
-  'onboarding.welcome.capability1Desc': 'Pozwól asystentowi obsługiwać e-maile, planować spotkania i śledzić projekty we wszystkich narzędziach.',
+  'onboarding.welcome.capability1Desc':
+    'Pozwól asystentowi obsługiwać e-maile, planować spotkania i śledzić projekty we wszystkich narzędziach.',
   'onboarding.welcome.capability2Title': 'Automatyzuj wszystko',
-  'onboarding.welcome.capability2Desc': 'Skonfiguruj rutyny działające na autopilocie — poranne briefingi, codzienne podsumowania i powtarzalne zadania.',
+  'onboarding.welcome.capability2Desc':
+    'Skonfiguruj rutyny działające na autopilocie — poranne briefingi, codzienne podsumowania i powtarzalne zadania.',
   'onboarding.welcome.capability3Title': 'Zachowaj prywatność',
-  'onboarding.welcome.capability3Desc': 'Twoje dane pozostają na Twoim komputerze. Ty kontrolujesz, co z niego wychodzi i dokąd trafia.',
+  'onboarding.welcome.capability3Desc':
+    'Twoje dane pozostają na Twoim komputerze. Ty kontrolujesz, co z niego wychodzi i dokąd trafia.',
   'walkthrough.steps.welcome.title': 'Witamy w OpenHuman',
-  'walkthrough.steps.welcome.content': 'Zróbmy szybką wycieczkę po Twoim nowym asystencie AI. Omówimy podstawy w zaledwie kilku krokach.',
+  'walkthrough.steps.welcome.content':
+    'Zróbmy szybką wycieczkę po Twoim nowym asystencie AI. Omówimy podstawy w zaledwie kilku krokach.',
   'walkthrough.steps.commandCenter.title': 'Twoje centrum dowodzenia',
-  'walkthrough.steps.commandCenter.content': 'To Twoja baza — szybki podgląd tego, co się dzieje i co wymaga Twojej uwagi.',
+  'walkthrough.steps.commandCenter.content':
+    'To Twoja baza — szybki podgląd tego, co się dzieje i co wymaga Twojej uwagi.',
   'walkthrough.steps.startChat.title': 'Rozpocznij rozmowę',
-  'walkthrough.steps.startChat.content': 'Dotknij tutaj w dowolnym momencie, aby rozpocząć czat ze swoją AI. Zadawaj pytania, wymyślaj pomysły lub załatwiaj sprawy.',
+  'walkthrough.steps.startChat.content':
+    'Dotknij tutaj w dowolnym momencie, aby rozpocząć czat ze swoją AI. Zadawaj pytania, wymyślaj pomysły lub załatwiaj sprawy.',
   'walkthrough.steps.aiAtWork.title': 'Twoja AI w pracy',
-  'walkthrough.steps.aiAtWork.content': 'Tutaj odbywają się rozmowy. Twój asystent może przeszukiwać internet, uruchamiać narzędzia i zapamiętywać kontekst między czatami.',
+  'walkthrough.steps.aiAtWork.content':
+    'Tutaj odbywają się rozmowy. Twój asystent może przeszukiwać internet, uruchamiać narzędzia i zapamiętywać kontekst między czatami.',
   'walkthrough.steps.connectTools.title': 'Wzmocnij narzędziami',
-  'walkthrough.steps.connectTools.content': 'Połącz Gmail, Slack, WhatsApp i więcej. Każde połączenie daje Twojemu asystentowi nowe możliwości.',
+  'walkthrough.steps.connectTools.content':
+    'Połącz Gmail, Slack, WhatsApp i więcej. Każde połączenie daje Twojemu asystentowi nowe możliwości.',
   'walkthrough.steps.chatAnywhere.title': 'Czatuj gdziekolwiek jesteś',
-  'walkthrough.steps.chatAnywhere.content': 'WhatsApp, Telegram, Slack, Discord — połącz swoje aplikacje do komunikacji, aby asystent mógł dotrzeć do Ciebie wszędzie.',
+  'walkthrough.steps.chatAnywhere.content':
+    'WhatsApp, Telegram, Slack, Discord — połącz swoje aplikacje do komunikacji, aby asystent mógł dotrzeć do Ciebie wszędzie.',
   'walkthrough.steps.aiBrain.title': 'Mózg Twojej AI',
-  'walkthrough.steps.aiBrain.content': 'Tutaj Twój asystent uczy się i zapamiętuje. Staje się mądrzejszy, im więcej go używasz — pamięć, kontekst i inteligencja mają tu swoje miejsce.',
+  'walkthrough.steps.aiBrain.content':
+    'Tutaj Twój asystent uczy się i zapamiętuje. Staje się mądrzejszy, im więcej go używasz — pamięć, kontekst i inteligencja mają tu swoje miejsce.',
   'walkthrough.steps.customize.title': 'Uczyń go swoim',
-  'walkthrough.steps.customize.content': 'Preferencje, prywatność, powiadomienia — wszystko jest tutaj. Możesz wznowić tę wycieczkę w dowolnym momencie z Ustawień.',
+  'walkthrough.steps.customize.content':
+    'Preferencje, prywatność, powiadomienia — wszystko jest tutaj. Możesz wznowić tę wycieczkę w dowolnym momencie z Ustawień.',
   'walkthrough.steps.quickAccess.title': 'Szybki dostęp',
-  'walkthrough.steps.quickAccess.content': 'Te karty to Twoje skróty — Czat, Umiejętności i Inteligencja są zawsze na wyciągnięcie ręki.',
+  'walkthrough.steps.quickAccess.content':
+    'Te karty to Twoje skróty — Czat, Umiejętności i Inteligencja są zawsze na wyciągnięcie ręki.',
   'walkthrough.steps.stayInformed.title': 'Bądź na bieżąco',
-  'walkthrough.steps.stayInformed.content': 'Alerty i automatyzacje znajdują się tutaj — briefingi, powiadomienia i aktywność w tle.',
+  'walkthrough.steps.stayInformed.content':
+    'Alerty i automatyzacje znajdują się tutaj — briefingi, powiadomienia i aktywność w tle.',
   'walkthrough.steps.allSet.title': 'Wszystko gotowe!',
-  'walkthrough.steps.allSet.content': 'Twój asystent zostawił Ci wiadomość powitalną — to Twoja przestrzeń do czatowania, zadawania pytań lub burzy mózgów. Baw się dobrze!',
+  'walkthrough.steps.allSet.content':
+    'Twój asystent zostawił Ci wiadomość powitalną — to Twoja przestrzeń do czatowania, zadawania pytań lub burzy mózgów. Baw się dobrze!',
   'walkthrough.phase.welcome': 'Witamy',
   'walkthrough.phase.connect': 'Połącz',
   'walkthrough.phase.automate': 'Automatyzuj',
@@ -4983,7 +5003,8 @@ const messages: TranslationMap = {
   'walkthrough.step.notifications': 'Inteligentne powiadomienia',
   'walkthrough.step.scheduling': 'Automatyczne planowanie',
   'walkthrough.step.summaries': 'Podsumowania spotkań',
-  'walkthrough.desc.gmail': 'Połącz swoją pocztę e-mail, aby otrzymywać inteligentne odpowiedzi i podsumowania',
+  'walkthrough.desc.gmail':
+    'Połącz swoją pocztę e-mail, aby otrzymywać inteligentne odpowiedzi i podsumowania',
   'walkthrough.desc.slack': 'Pozwól asystentowi dołączyć do rozmów zespołowych',
   'walkthrough.desc.whatsapp': 'Czatuj ze swoim asystentem w drodze',
   'walkthrough.desc.telegram': 'Bezpieczna komunikacja z Twoją AI',
@@ -4994,14 +5015,20 @@ const messages: TranslationMap = {
   'walkthrough.desc.summaries': 'Nigdy więcej nie przegap szczegółów spotkania',
   'walkthrough.card.completedAria': '{label} — ukończono',
   'walkthrough.card.actionAria': 'Ukończ {label}',
-  'walkthrough.welcome.description': 'Pozwól nam poprowadzić Cię przez konfigurację Twojego asystenta AI.',
-  'walkthrough.connect.description': 'Połącz narzędzia, których już używasz. Każde połączenie daje Twojemu asystentowi nowe możliwości.',
-  'walkthrough.automate.description': 'Wybierz, co Twój asystent powinien obsługiwać automatycznie.',
-  'walkthrough.review.description': 'Oto podsumowanie tego, co skonfigurowałeś. Zawsze możesz to zmienić później.',
-  'walkthrough.review.skipped': 'Pominąłeś konfigurację. Możesz ją skonfigurować w dowolnym momencie w Ustawieniach.',
+  'walkthrough.welcome.description':
+    'Pozwól nam poprowadzić Cię przez konfigurację Twojego asystenta AI.',
+  'walkthrough.connect.description':
+    'Połącz narzędzia, których już używasz. Każde połączenie daje Twojemu asystentowi nowe możliwości.',
+  'walkthrough.automate.description':
+    'Wybierz, co Twój asystent powinien obsługiwać automatycznie.',
+  'walkthrough.review.description':
+    'Oto podsumowanie tego, co skonfigurowałeś. Zawsze możesz to zmienić później.',
+  'walkthrough.review.skipped':
+    'Pominąłeś konfigurację. Możesz ją skonfigurować w dowolnym momencie w Ustawieniach.',
   'walkthrough.review.empty': 'Nie ukończono jeszcze żadnych działań.',
   'walkthrough.done.title': 'Wszystko gotowe!',
-  'walkthrough.done.description': 'Twój asystent jest gotowy do pomocy. Połączenia są skonfigurowane, a automatyzacje ustawione.',
+  'walkthrough.done.description':
+    'Twój asystent jest gotowy do pomocy. Połączenia są skonfigurowane, a automatyzacje ustawione.',
   'webhooks.activity.empty': 'Brak aktywności.',
   'webhooks.activity.title': 'Ostatnia aktywność',
   'webhooks.composioHistory.empty': 'Brak historii.',

@@ -632,7 +632,8 @@ const messages: TranslationMap = {
   'onboarding.welcomeDesc': 'مساعدك الذكي الفائق الذي يعمل على جهازك. خاص وبسيط وبالغ القوة.',
   'onboarding.context': 'جمع السياق',
   'onboarding.welcome.heroTitle': 'مركز الذكاء الاصطناعي للعمل والحياة',
-  'onboarding.welcome.heroSubtitle': 'OpenHuman يربط أدواتك، ويؤتمت مهامك، ويقدم النتائج — كل ذلك من سطح المكتب.',
+  'onboarding.welcome.heroSubtitle':
+    'OpenHuman يربط أدواتك، ويؤتمت مهامك، ويقدم النتائج — كل ذلك من سطح المكتب.',
   'onboarding.contextDesc': 'اربط الأدوات والخدمات التي تستخدمها يوميًا.',
   'onboarding.localAI': 'الذكاء الاصطناعي المحلي',
   'onboarding.localAIDesc': 'إعداد نموذج ذكاء اصطناعي محلي يعمل على جهازك.',
@@ -2365,7 +2366,8 @@ const messages: TranslationMap = {
     'هذا عنوان HTTP عادي على مضيف عام — لن تكون حركة البيانات مشفّرة. استخدم HTTPS ما لم تكن تثق بهذه الشبكة.',
   'bootCheck.heroTitle': 'مرحبًا بك في OpenHuman',
   'bootCheck.heroDesktopDesc': 'مساعدك الشخصي فائق الذكاء. خاص وبسيط وقوي للغاية.',
-  'bootCheck.heroWebDesc': 'اتصل ببيئة التشغيل الخاصة بك للبدء. أدخل عنوان URL ورمز المصادقة أدناه، أو احصل على تطبيق سطح المكتب.',
+  'bootCheck.heroWebDesc':
+    'اتصل ببيئة التشغيل الخاصة بك للبدء. أدخل عنوان URL ورمز المصادقة أدناه، أو احصل على تطبيق سطح المكتب.',
   'bootCheck.chooseCoreMode': 'اختر بيئة التشغيل',
   'bootCheck.connectToCore': 'اتصل ببيئة تشغيلك',
   'bootCheck.desktopDescription': 'يحتاج OpenHuman إلى بيئة تشغيل للعمل. اختر مكانها.',
@@ -4767,35 +4769,50 @@ const messages: TranslationMap = {
   'onboarding.welcome.hubTitle': 'أتمتة',
   'onboarding.welcome.hubDesc': 'يعمل مساعدك عبر عالمك المتصل — يدير وينظم وينفذ.',
   'onboarding.welcome.outputTitle': 'توصيل',
-  'onboarding.welcome.outputDesc': 'احصل على ملخصات ومهام مكتملة ورؤى يتم تسليمها حيث تحتاج إليها بالضبط.',
+  'onboarding.welcome.outputDesc':
+    'احصل على ملخصات ومهام مكتملة ورؤى يتم تسليمها حيث تحتاج إليها بالضبط.',
   'onboarding.welcome.capability1Title': 'إدارة العمل',
-  'onboarding.welcome.capability1Desc': 'دع مساعدك يتولى رسائل البريد الإلكتروني وجدولة الاجتماعات وتتبع المشاريع عبر جميع أدواتك.',
+  'onboarding.welcome.capability1Desc':
+    'دع مساعدك يتولى رسائل البريد الإلكتروني وجدولة الاجتماعات وتتبع المشاريع عبر جميع أدواتك.',
   'onboarding.welcome.capability2Title': 'أتمتة كل شيء',
-  'onboarding.welcome.capability2Desc': 'قم بإعداد مهام روتينية تعمل تلقائيًا — ملخصات صباحية وملخصات يومية ومهام متكررة.',
+  'onboarding.welcome.capability2Desc':
+    'قم بإعداد مهام روتينية تعمل تلقائيًا — ملخصات صباحية وملخصات يومية ومهام متكررة.',
   'onboarding.welcome.capability3Title': 'حافظ على خصوصيتك',
-  'onboarding.welcome.capability3Desc': 'بياناتك تبقى على جهازك. أنت تتحكم فيما يغادر وإلى أين يذهب.',
+  'onboarding.welcome.capability3Desc':
+    'بياناتك تبقى على جهازك. أنت تتحكم فيما يغادر وإلى أين يذهب.',
   'walkthrough.steps.welcome.title': 'مرحبًا بك في OpenHuman',
-  'walkthrough.steps.welcome.content': 'لنأخذ جولة سريعة على مساعدك الذكي الجديد. سنغطي الأساسيات في بضع خطوات فقط.',
+  'walkthrough.steps.welcome.content':
+    'لنأخذ جولة سريعة على مساعدك الذكي الجديد. سنغطي الأساسيات في بضع خطوات فقط.',
   'walkthrough.steps.commandCenter.title': 'مركز القيادة الخاص بك',
-  'walkthrough.steps.commandCenter.content': 'هذه هي قاعدتك الرئيسية — لمحة سريعة عما يحدث وما يحتاج انتباهك.',
+  'walkthrough.steps.commandCenter.content':
+    'هذه هي قاعدتك الرئيسية — لمحة سريعة عما يحدث وما يحتاج انتباهك.',
   'walkthrough.steps.startChat.title': 'ابدأ محادثة',
-  'walkthrough.steps.startChat.content': 'اضغط هنا في أي وقت لبدء الدردشة مع مساعدك الذكي. اطرح أسئلة، أو تبادل الأفكار، أو أنجز المهام.',
+  'walkthrough.steps.startChat.content':
+    'اضغط هنا في أي وقت لبدء الدردشة مع مساعدك الذكي. اطرح أسئلة، أو تبادل الأفكار، أو أنجز المهام.',
   'walkthrough.steps.aiAtWork.title': 'مساعدك الذكي أثناء العمل',
-  'walkthrough.steps.aiAtWork.content': 'هنا تحدث المحادثات. يمكن لمساعدك البحث في الويب، وتشغيل الأدوات، وتذكر السياق عبر المحادثات.',
+  'walkthrough.steps.aiAtWork.content':
+    'هنا تحدث المحادثات. يمكن لمساعدك البحث في الويب، وتشغيل الأدوات، وتذكر السياق عبر المحادثات.',
   'walkthrough.steps.connectTools.title': 'تعزيز القدرات بالأدوات',
-  'walkthrough.steps.connectTools.content': 'اربط Gmail وSlack وWhatsApp والمزيد. كل اتصال يمنح مساعدك قدرات جديدة.',
+  'walkthrough.steps.connectTools.content':
+    'اربط Gmail وSlack وWhatsApp والمزيد. كل اتصال يمنح مساعدك قدرات جديدة.',
   'walkthrough.steps.chatAnywhere.title': 'تحدث أينما كنت',
-  'walkthrough.steps.chatAnywhere.content': 'WhatsApp وTelegram وSlack وDiscord — اربط تطبيقات المراسلة الخاصة بك ليصل مساعدك إليك أينما كنت.',
+  'walkthrough.steps.chatAnywhere.content':
+    'WhatsApp وTelegram وSlack وDiscord — اربط تطبيقات المراسلة الخاصة بك ليصل مساعدك إليك أينما كنت.',
   'walkthrough.steps.aiBrain.title': 'عقل مساعدك الذكي',
-  'walkthrough.steps.aiBrain.content': 'هنا يتعلم مساعدك ويتذكر. يصبح أكثر ذكاءً كلما استخدمته أكثر — الذاكرة والسياق والذكاء كلها هنا.',
+  'walkthrough.steps.aiBrain.content':
+    'هنا يتعلم مساعدك ويتذكر. يصبح أكثر ذكاءً كلما استخدمته أكثر — الذاكرة والسياق والذكاء كلها هنا.',
   'walkthrough.steps.customize.title': 'اجعلها خاصة بك',
-  'walkthrough.steps.customize.content': 'التفضيلات والخصوصية والإشعارات — كل شيء هنا. يمكنك إعادة تشغيل هذه الجولة في أي وقت من الإعدادات.',
+  'walkthrough.steps.customize.content':
+    'التفضيلات والخصوصية والإشعارات — كل شيء هنا. يمكنك إعادة تشغيل هذه الجولة في أي وقت من الإعدادات.',
   'walkthrough.steps.quickAccess.title': 'وصول سريع',
-  'walkthrough.steps.quickAccess.content': 'هذه التبويبات هي اختصاراتك — الدردشة والمهارات والذكاء دائمًا على بُعد نقرة واحدة.',
+  'walkthrough.steps.quickAccess.content':
+    'هذه التبويبات هي اختصاراتك — الدردشة والمهارات والذكاء دائمًا على بُعد نقرة واحدة.',
   'walkthrough.steps.stayInformed.title': 'ابق على اطلاع',
-  'walkthrough.steps.stayInformed.content': 'التنبيهات والأتمتة هنا — الملخصات والإشعارات والنشاط في الخلفية.',
+  'walkthrough.steps.stayInformed.content':
+    'التنبيهات والأتمتة هنا — الملخصات والإشعارات والنشاط في الخلفية.',
   'walkthrough.steps.allSet.title': 'أنت جاهز تمامًا!',
-  'walkthrough.steps.allSet.content': 'ترك لك مساعدك رسالة ترحيب — هذه مساحتك للدردشة وطرح الأسئلة وتبادل الأفكار. استمتع!',
+  'walkthrough.steps.allSet.content':
+    'ترك لك مساعدك رسالة ترحيب — هذه مساحتك للدردشة وطرح الأسئلة وتبادل الأفكار. استمتع!',
   'walkthrough.phase.welcome': 'مرحبًا',
   'walkthrough.phase.connect': 'اتصال',
   'walkthrough.phase.automate': 'أتمتة',
@@ -4823,10 +4840,13 @@ const messages: TranslationMap = {
   'walkthrough.card.completedAria': '{label} — مكتمل',
   'walkthrough.card.actionAria': 'إكمال {label}',
   'walkthrough.welcome.description': 'دعنا نرشدك خلال إعداد مساعدك الذكي.',
-  'walkthrough.connect.description': 'اربط الأدوات التي تستخدمها بالفعل. كل اتصال يمنح مساعدك قدرات جديدة.',
+  'walkthrough.connect.description':
+    'اربط الأدوات التي تستخدمها بالفعل. كل اتصال يمنح مساعدك قدرات جديدة.',
   'walkthrough.automate.description': 'اختر ما يجب على مساعدك التعامل معه تلقائيًا.',
-  'walkthrough.review.description': 'إليك ملخص لما قمت بإعداده. يمكنك دائمًا تغيير هذه الإعدادات لاحقًا.',
-  'walkthrough.review.skipped': 'لقد تخطيت الإعداد. يمكنك تكوين هذه الخيارات في أي وقت من الإعدادات.',
+  'walkthrough.review.description':
+    'إليك ملخص لما قمت بإعداده. يمكنك دائمًا تغيير هذه الإعدادات لاحقًا.',
+  'walkthrough.review.skipped':
+    'لقد تخطيت الإعداد. يمكنك تكوين هذه الخيارات في أي وقت من الإعدادات.',
   'walkthrough.review.empty': 'لم يتم إكمال أي إجراءات بعد.',
   'walkthrough.done.title': 'أنت جاهز تمامًا!',
   'walkthrough.done.description': 'مساعدك جاهز للمساعدة. تم إعداد الاتصالات وتهيئة الأتمتة.',
