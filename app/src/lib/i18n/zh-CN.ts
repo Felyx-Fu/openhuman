@@ -4704,7 +4704,7 @@ const messages: TranslationMap = {
   'walkthrough.review.skipped': '你跳过了设置，可以随时在设置中配置这些选项。',
   'walkthrough.review.empty': '尚未完成任何操作。',
   'walkthrough.done.title': '一切就绪！',
-  'walkthrough.done.description': '你的助手已准备好为你服务。连接已建立，自动化已配置。'
+  'walkthrough.done.description': '你的助手已准备好为你服务。连接已建立，自动化已配置。',
   'webhooks.activity.empty': '暂无活动',
   'webhooks.activity.title': '最近活动',
   'webhooks.composioHistory.empty': '暂无记录',

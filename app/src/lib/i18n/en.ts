@@ -5561,7 +5561,7 @@ const en: TranslationMap = {
   'walkthrough.review.skipped': 'You skipped the setup. You can configure these anytime in Settings.',
   'walkthrough.review.empty': 'No actions completed yet.',
   'walkthrough.done.title': "You're all set!",
-  'walkthrough.done.description': 'Your assistant is ready to help. Connections are set up and automations are configured.'
+  'walkthrough.done.description': 'Your assistant is ready to help. Connections are set up and automations are configured.',
   'webhooks.activity.empty': 'No recent activity',
   'webhooks.activity.title': 'Recent Activity',
   'webhooks.composioHistory.empty': 'Empty',
