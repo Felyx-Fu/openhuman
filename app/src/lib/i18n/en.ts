@@ -2921,6 +2921,11 @@ const en: TranslationMap = {
   'bootCheck.tokenRequired': "We'll need an auth token to connect.",
   'bootCheck.httpPublicWarning':
     'This is a plain HTTP URL on a public host — traffic will not be encrypted. Use HTTPS unless you trust this network.',
+  'bootCheck.heroTitle': 'Welcome to OpenHuman',
+  'bootCheck.heroDesktopDesc':
+    'Your personal AI super intelligence. Private, simple, and extremely powerful.',
+  'bootCheck.heroWebDesc':
+    'Connect to your runtime to get started. Drop in its URL and auth token below, or grab the desktop app.',
   'bootCheck.chooseCoreMode': 'Select a Runtime',
   'bootCheck.connectToCore': 'Connect to Your Runtime',
   'bootCheck.desktopDescription': 'OpenHuman needs a runtime to think. Pick where it should live.',
@@ -5484,6 +5489,40 @@ const en: TranslationMap = {
   'walkthrough.tooltip.next': 'Next →',
   'walkthrough.tooltip.skip': 'Skip tour',
   'walkthrough.tooltip.stepCounter': '{n} of {total}',
+  // Walkthrough product tour steps — narrative-driven onboarding guide
+  'walkthrough.steps.welcome.title': 'Welcome to OpenHuman',
+  'walkthrough.steps.welcome.content':
+    "Let's take a quick tour of your new AI assistant. We'll cover the essentials in just a few steps.",
+  'walkthrough.steps.commandCenter.title': 'Your Command Center',
+  'walkthrough.steps.commandCenter.content':
+    "This is your home base — a quick snapshot of what's happening and what needs your attention.",
+  'walkthrough.steps.startChat.title': 'Start a Conversation',
+  'walkthrough.steps.startChat.content':
+    'Tap here anytime to begin chatting with your AI. Ask questions, brainstorm ideas, or get things done.',
+  'walkthrough.steps.aiAtWork.title': 'Your AI at Work',
+  'walkthrough.steps.aiAtWork.content':
+    'This is where conversations happen. Your assistant can search the web, run tools, and remember context across chats.',
+  'walkthrough.steps.connectTools.title': 'Supercharge with Tools',
+  'walkthrough.steps.connectTools.content':
+    'Connect Gmail, Slack, WhatsApp, and more. Each connection gives your assistant new abilities.',
+  'walkthrough.steps.chatAnywhere.title': 'Chat Where You Are',
+  'walkthrough.steps.chatAnywhere.content':
+    'WhatsApp, Telegram, Slack, Discord — connect your messaging apps so your assistant can reach you anywhere.',
+  'walkthrough.steps.aiBrain.title': "Your AI's Brain",
+  'walkthrough.steps.aiBrain.content':
+    'This is where your assistant learns and remembers. It gets smarter the more you use it — memory, context, and intelligence all live here.',
+  'walkthrough.steps.customize.title': 'Make It Yours',
+  'walkthrough.steps.customize.content':
+    'Preferences, privacy, notifications — everything is here. You can restart this tour anytime from Settings.',
+  'walkthrough.steps.quickAccess.title': 'Quick Access',
+  'walkthrough.steps.quickAccess.content':
+    'These tabs are your shortcuts — Chat, Skills, and Intelligence are always one tap away.',
+  'walkthrough.steps.stayInformed.title': 'Stay Informed',
+  'walkthrough.steps.stayInformed.content':
+    'Alerts and automations live here — briefings, notifications, and background activity.',
+  'walkthrough.steps.allSet.title': "You're All Set!",
+  'walkthrough.steps.allSet.content':
+    'Your assistant left you a welcome note — this is your space to chat, ask questions, or brainstorm. Have fun!',
   'webhooks.activity.empty': 'No recent activity',
   'webhooks.activity.title': 'Recent Activity',
   'webhooks.composioHistory.empty': 'Empty',
