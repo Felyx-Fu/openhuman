@@ -464,6 +464,14 @@ pub(crate) fn parse_hermes_entry(item: &serde_json::Value) -> Option<CatalogEntr
         .and_then(|v| v.as_str())
         .map(|s| s.to_string());
 
+    tracing::debug!(
+        name = %name,
+        source = %source,
+        category = %category,
+        source_url = source_url.as_deref().unwrap_or(""),
+        "[skill_registry] parsed Hermes sourceUrl"
+    );
+
     let download_url = derive_download_url(
         &source,
         &category,
@@ -471,9 +479,10 @@ pub(crate) fn parse_hermes_entry(item: &serde_json::Value) -> Option<CatalogEntr
         docs_path.as_deref(),
         source_url.as_deref(),
     );
+    let id = catalog_entry_id(&source, &category, &name, source_url.as_deref());
 
     Some(CatalogEntry {
-        id: name.clone(),
+        id,
         name,
         description,
         source,
@@ -500,12 +509,29 @@ fn derive_download_url(
     if let Ok(base) = std::env::var(DOWNLOAD_BASE_URL_ENV) {
         let base = base.trim().trim_end_matches('/');
         if !base.is_empty() {
-            return format!("{base}/{name}/SKILL.md");
+            let url = format!("{base}/{name}/SKILL.md");
+            tracing::debug!(
+                source = %source,
+                category = %category,
+                name = %name,
+                base = %base,
+                url = %url,
+                "[skill_registry] derived download URL from env override"
+            );
+            return url;
         }
     }
     // Bundled built-in / optional skills carry a `docsPath` and live in the
     // Hermes repo, so derive their raw URL from that (canonical path).
     if let Some(url) = docs_path.and_then(download_url_from_docs_path) {
+        tracing::debug!(
+            source = %source,
+            category = %category,
+            name = %name,
+            docs_path = docs_path.unwrap_or(""),
+            url = %url,
+            "[skill_registry] derived download URL from docsPath"
+        );
         return url;
     }
     // Aggregated community skills (ClawHub, skills.sh, browse.sh, …) carry a
@@ -513,6 +539,14 @@ fn derive_download_url(
     // at a fetchable raw GitHub file. Without this every aggregated skill fell
     // back to the Hermes base below and 404'd at install time (#3741).
     if let Some(url) = source_url.and_then(normalize_source_url) {
+        tracing::debug!(
+            source = %source,
+            category = %category,
+            name = %name,
+            source_url = source_url.unwrap_or(""),
+            url = %url,
+            "[skill_registry] derived download URL from sourceUrl"
+        );
         return url;
     }
     // Last-resort fallback: assume the skill lives in the Hermes repo. Correct
@@ -523,9 +557,60 @@ fn derive_download_url(
         "optional" => "optional-skills",
         _ => "skills",
     };
-    format!(
+    let url = format!(
         "https://raw.githubusercontent.com/NousResearch/hermes-agent/main/{root}/{category}/{name}/SKILL.md"
+    );
+    tracing::debug!(
+        source = %source,
+        category = %category,
+        name = %name,
+        url = %url,
+        "[skill_registry] derived download URL from Hermes fallback"
+    );
+    url
+}
+
+fn catalog_entry_id(source: &str, category: &str, name: &str, source_url: Option<&str>) -> String {
+    let Some(source_url) = source_url.map(str::trim).filter(|value| !value.is_empty()) else {
+        return name.to_string();
+    };
+    format!(
+        "{}:{}:{}:{}",
+        id_component(source),
+        id_component(category),
+        id_component(name),
+        stable_hex_hash(source_url)
     )
+}
+
+fn id_component(value: &str) -> String {
+    let component = value
+        .trim()
+        .chars()
+        .map(|ch| {
+            if ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_' | '.') {
+                ch.to_ascii_lowercase()
+            } else {
+                '-'
+            }
+        })
+        .collect::<String>()
+        .trim_matches('-')
+        .to_string();
+    if component.is_empty() {
+        "unknown".to_string()
+    } else {
+        component
+    }
+}
+
+fn stable_hex_hash(value: &str) -> String {
+    let mut hash = 0xcbf29ce484222325u64;
+    for byte in value.as_bytes() {
+        hash ^= u64::from(*byte);
+        hash = hash.wrapping_mul(0x100000001b3);
+    }
+    format!("{hash:016x}")
 }
 
 /// Normalise a catalog `sourceUrl` into a fetchable raw-markdown URL, or return
@@ -542,7 +627,7 @@ fn normalize_source_url(source_url: &str) -> Option<String> {
     }
     let rest = url.strip_prefix("https://github.com/")?;
     let (repo, after_blob) = rest.split_once("/blob/")?;
-    if repo.is_empty() || !after_blob.ends_with(".md") {
+    if repo.is_empty() || !repo.contains('/') || !after_blob.ends_with(".md") {
         return None;
     }
     Some(format!(
@@ -624,6 +709,7 @@ mod tests {
             "sourceUrl": "https://github.com/browserbase/browse.sh/blob/main/skills/xero.com/login-za6riz/SKILL.md"
         });
         let entry = parse_hermes_entry(&item).expect("entry");
+        assert_ne!(entry.id, "login");
         assert_eq!(
             entry.download_url,
             "https://raw.githubusercontent.com/browserbase/browse.sh/main/skills/xero.com/login-za6riz/SKILL.md"
@@ -640,10 +726,50 @@ mod tests {
             "sourceUrl": "https://raw.githubusercontent.com/acme/skills/main/misc/tool/SKILL.md"
         });
         let entry = parse_hermes_entry(&item).expect("entry");
+        assert_ne!(entry.id, "tool");
         assert_eq!(
             entry.download_url,
             "https://raw.githubusercontent.com/acme/skills/main/misc/tool/SKILL.md"
         );
+    }
+
+    #[test]
+    fn source_url_entries_get_unique_ids_for_same_name() {
+        let first = parse_hermes_entry(&json!({
+            "name": "login",
+            "description": "First login skill",
+            "category": "auth",
+            "source": "browse.sh",
+            "sourceUrl": "https://github.com/browserbase/browse.sh/blob/main/skills/a/login/SKILL.md"
+        }))
+        .expect("first entry");
+        let second = parse_hermes_entry(&json!({
+            "name": "login",
+            "description": "Second login skill",
+            "category": "auth",
+            "source": "browse.sh",
+            "sourceUrl": "https://github.com/other/skills/blob/main/skills/b/login/SKILL.md"
+        }))
+        .expect("second entry");
+
+        assert_ne!(first.id, second.id);
+        assert_eq!(first.name, second.name);
+        assert!(first.id.starts_with("browse.sh:auth:login:"));
+        assert!(second.id.starts_with("browse.sh:auth:login:"));
+    }
+
+    #[test]
+    fn entries_without_source_url_keep_legacy_name_id() {
+        let entry = parse_hermes_entry(&json!({
+            "name": "apple-notes",
+            "description": "Manage Apple Notes",
+            "category": "apple",
+            "source": "built-in",
+            "docsPath": "bundled/apple/apple-apple-notes"
+        }))
+        .expect("entry");
+
+        assert_eq!(entry.id, "apple-notes");
     }
 
     #[test]
@@ -688,6 +814,8 @@ mod tests {
     fn normalize_source_url_rejects_blob_url_without_markdown_target() {
         // A blob URL that does not point at a .md file is not a usable SKILL.md.
         assert!(normalize_source_url("https://github.com/acme/repo/blob/main/skills/x").is_none());
+        // A blob URL without both owner and repository cannot form a raw URL.
+        assert!(normalize_source_url("https://github.com/acme/blob/main/SKILL.md").is_none());
         // Bare hosts / tree listings are not files either.
         assert!(normalize_source_url("https://github.com/acme/repo").is_none());
     }
