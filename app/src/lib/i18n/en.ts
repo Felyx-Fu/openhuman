@@ -904,6 +904,27 @@ const en: TranslationMap = {
   'onboarding.welcome': "Hi. I'm OpenHuman.",
   'onboarding.welcomeDesc':
     'Your super-intelligent AI assistant that runs on your computer. Private, simple, and extremely powerful.',
+  'onboarding.welcome.heroTitle': 'Your AI hub for work and life',
+  'onboarding.welcome.heroSubtitle':
+    'OpenHuman connects your tools, automates your tasks, and delivers results — all from your desktop.',
+  'onboarding.welcome.inputTitle': 'Connect',
+  'onboarding.welcome.inputDesc':
+    'Link your tools, accounts, and services. Everything flows into one place.',
+  'onboarding.welcome.hubTitle': 'Automate',
+  'onboarding.welcome.hubDesc':
+    'Your assistant works across your connected world — managing, organizing, and executing.',
+  'onboarding.welcome.outputTitle': 'Deliver',
+  'onboarding.welcome.outputDesc':
+    'Get summaries, completed tasks, and insights delivered right where you need them.',
+  'onboarding.welcome.capability1Title': 'Manage work',
+  'onboarding.welcome.capability1Desc':
+    'Let your assistant handle emails, schedule meetings, and track projects across all your tools.',
+  'onboarding.welcome.capability2Title': 'Automate everything',
+  'onboarding.welcome.capability2Desc':
+    'Set up routines that run on autopilot — morning briefings, daily summaries, and recurring tasks.',
+  'onboarding.welcome.capability3Title': 'Stay private',
+  'onboarding.welcome.capability3Desc':
+    'Your data stays on your machine. You control what leaves and where it goes.',
   'onboarding.context': 'Context Gathering',
   'onboarding.contextDesc': 'Connect the tools and services you use every day.',
   'onboarding.localAI': 'Local AI',
