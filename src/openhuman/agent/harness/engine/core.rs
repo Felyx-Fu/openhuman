@@ -741,6 +741,17 @@ pub(crate) async fn run_turn_engine(
                     "[agent_loop] circuit breaker tripped — halting with root cause"
                 );
                 halt_reason = Some(reason);
+                // Stop executing the rest of this assistant message's tool-call
+                // batch (#3104). Native-tool providers can emit multiple tool
+                // calls in one message; without this break the loop would drain
+                // the remaining calls — and on a permanent inference failure
+                // (out of budget / provider-config) that means launching the
+                // *next* paid sub-agent delegation right after the first one
+                // proved the wall is unrecoverable. Breaking here makes the
+                // "halt on the first occurrence" guarantee hold for batched
+                // calls too. The tool results recorded so far are still threaded
+                // into history below, so the caller keeps full context.
+                break;
             }
 
             // Early-exit when a sub-agent calls ask_user_clarification:
