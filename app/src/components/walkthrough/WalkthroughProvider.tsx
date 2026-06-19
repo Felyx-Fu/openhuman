@@ -61,13 +61,7 @@ export const WalkthroughProvider = ({
   );
 
   const phaseIcons: Record<WalkthroughPhase, string> = useMemo(
-    () => ({
-      welcome: '👋',
-      connect: '🔗',
-      automate: '⚡',
-      review: '✅',
-      done: '🎉',
-    }),
+    () => ({ welcome: '👋', connect: '🔗', automate: '⚡', review: '✅', done: '🎉' }),
     []
   );
 
@@ -121,11 +115,7 @@ export const WalkthroughProvider = ({
     [state, completeStep, onSkip, phaseLabels, phaseIcons, stepLabels, stepDescriptions]
   );
 
-  return (
-    <WalkthroughUIContext.Provider value={value}>
-      {children}
-    </WalkthroughUIContext.Provider>
-  );
+  return <WalkthroughUIContext.Provider value={value}>{children}</WalkthroughUIContext.Provider>;
 };
 
 export default WalkthroughProvider;

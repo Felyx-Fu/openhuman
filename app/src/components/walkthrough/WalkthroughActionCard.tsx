@@ -1,6 +1,6 @@
 import { useT } from '../../lib/i18n/I18nContext';
-import { useWalkthroughUI } from './WalkthroughProvider';
 import type { WalkthroughStepState } from '../../pages/onboarding/OnboardingContext';
+import { useWalkthroughUI } from './WalkthroughProvider';
 
 interface WalkthroughActionCardProps {
   step: WalkthroughStepState;
@@ -26,27 +26,28 @@ const WalkthroughActionCard = ({ step }: WalkthroughActionCardProps) => {
       className={`
         w-full text-left p-4 rounded-xl border transition-all duration-200
         flex items-start gap-3 group
-        ${step.completed
-          ? 'bg-[#2F6EF4]/5 border-[#2F6EF4]/30 cursor-default'
-          : 'bg-white dark:bg-neutral-900 border-stone-200 dark:border-neutral-800 hover:border-[#2F6EF4]/40 hover:shadow-md hover:shadow-[#2F6EF4]/5 active:scale-[0.98]'
+        ${
+          step.completed
+            ? 'bg-[#2F6EF4]/5 border-[#2F6EF4]/30 cursor-default'
+            : 'bg-white dark:bg-neutral-900 border-stone-200 dark:border-neutral-800 hover:border-[#2F6EF4]/40 hover:shadow-md hover:shadow-[#2F6EF4]/5 active:scale-[0.98]'
         }
       `}
-      aria-label={step.completed
-        ? t('walkthrough.card.completedAria', `${label} — completed`).replace('{label}', label)
-        : t('walkthrough.card.actionAria', `Complete ${label}`).replace('{label}', label)
-      }
-    >
+      aria-label={
+        step.completed
+          ? t('walkthrough.card.completedAria', `${label} — completed`).replace('{label}', label)
+          : t('walkthrough.card.actionAria', `Complete ${label}`).replace('{label}', label)
+      }>
       {/* Status indicator */}
       <div
         className={`
           shrink-0 w-6 h-6 rounded-full border-2 flex items-center justify-center
           transition-all duration-300 mt-0.5
-          ${step.completed
-            ? 'bg-[#2F6EF4] border-[#2F6EF4]'
-            : 'border-stone-300 dark:border-neutral-600 group-hover:border-[#2F6EF4]/60'
+          ${
+            step.completed
+              ? 'bg-[#2F6EF4] border-[#2F6EF4]'
+              : 'border-stone-300 dark:border-neutral-600 group-hover:border-[#2F6EF4]/60'
           }
-        `}
-      >
+        `}>
         {step.completed && (
           <svg
             className="w-3.5 h-3.5 text-white animate-in zoom-in duration-200"
@@ -55,8 +56,7 @@ const WalkthroughActionCard = ({ step }: WalkthroughActionCardProps) => {
             stroke="currentColor"
             strokeWidth="3"
             strokeLinecap="round"
-            strokeLinejoin="round"
-          >
+            strokeLinejoin="round">
             <polyline points="20 6 9 17 4 12" />
           </svg>
         )}
@@ -67,12 +67,12 @@ const WalkthroughActionCard = ({ step }: WalkthroughActionCardProps) => {
         <h4
           className={`
             text-sm font-semibold transition-colors
-            ${step.completed
-              ? 'text-[#2F6EF4]'
-              : 'text-stone-900 dark:text-neutral-100 group-hover:text-[#2F6EF4]'
+            ${
+              step.completed
+                ? 'text-[#2F6EF4]'
+                : 'text-stone-900 dark:text-neutral-100 group-hover:text-[#2F6EF4]'
             }
-          `}
-        >
+          `}>
           {label}
         </h4>
         {description && (
@@ -91,8 +91,7 @@ const WalkthroughActionCard = ({ step }: WalkthroughActionCardProps) => {
           stroke="currentColor"
           strokeWidth="2"
           strokeLinecap="round"
-          strokeLinejoin="round"
-        >
+          strokeLinejoin="round">
           <polyline points="9 18 15 12 9 6" />
         </svg>
       )}

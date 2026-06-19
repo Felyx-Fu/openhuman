@@ -20,12 +20,7 @@ export type CustomStepChoice = 'default' | 'configure';
  * Each phase can carry its own progress metadata so the UI can render
  * animated progress bars, completed checkmarks, and contextual CTAs.
  */
-export type WalkthroughPhase =
-  | 'welcome'
-  | 'connect'
-  | 'automate'
-  | 'review'
-  | 'done';
+export type WalkthroughPhase = 'welcome' | 'connect' | 'automate' | 'review' | 'done';
 
 export interface WalkthroughStepState {
   /** Unique key for this step (e.g. 'gmail', 'slack', 'whatsapp'). */

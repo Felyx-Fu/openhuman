@@ -5555,13 +5555,17 @@ const en: TranslationMap = {
   'walkthrough.card.actionAria': 'Complete {label}',
   // ── Walkthrough phase descriptions (a03) ───────────────────────────────
   'walkthrough.welcome.description': 'Let us guide you through setting up your AI assistant.',
-  'walkthrough.connect.description': 'Connect the tools you already use. Each connection gives your assistant new abilities.',
+  'walkthrough.connect.description':
+    'Connect the tools you already use. Each connection gives your assistant new abilities.',
   'walkthrough.automate.description': 'Choose what your assistant should handle automatically.',
-  'walkthrough.review.description': "Here's a summary of what you've set up. You can always change these later.",
-  'walkthrough.review.skipped': 'You skipped the setup. You can configure these anytime in Settings.',
+  'walkthrough.review.description':
+    "Here's a summary of what you've set up. You can always change these later.",
+  'walkthrough.review.skipped':
+    'You skipped the setup. You can configure these anytime in Settings.',
   'walkthrough.review.empty': 'No actions completed yet.',
   'walkthrough.done.title': "You're all set!",
-  'walkthrough.done.description': 'Your assistant is ready to help. Connections are set up and automations are configured.',
+  'walkthrough.done.description':
+    'Your assistant is ready to help. Connections are set up and automations are configured.',
   'webhooks.activity.empty': 'No recent activity',
   'webhooks.activity.title': 'Recent Activity',
   'webhooks.composioHistory.empty': 'Empty',

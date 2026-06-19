@@ -14,13 +14,7 @@ import {
 } from './OnboardingContext';
 
 /** Ordered list of walkthrough phases in the narrative arc. */
-const WALKTHROUGH_PHASES: WalkthroughPhase[] = [
-  'welcome',
-  'connect',
-  'automate',
-  'review',
-  'done',
-];
+const WALKTHROUGH_PHASES: WalkthroughPhase[] = ['welcome', 'connect', 'automate', 'review', 'done'];
 
 /** Default action-card steps for the connect phase. */
 const CONNECT_STEPS = [
@@ -40,12 +34,7 @@ const AUTOMATE_STEPS = [
 ];
 
 function createInitialWalkthrough(): WalkthroughState {
-  return {
-    phase: 'welcome',
-    steps: CONNECT_STEPS,
-    completed: false,
-    skipped: false,
-  };
+  return { phase: 'welcome', steps: CONNECT_STEPS, completed: false, skipped: false };
 }
 
 /**
@@ -69,67 +58,57 @@ const OnboardingLayout = () => {
     []
   );
 
-  const advanceWalkthrough = useCallback(
-    (stepKey?: string): WalkthroughState => {
-      let updated: WalkthroughState | undefined;
-      setDraftState((prev) => {
-        const wt = prev.walkthrough ?? createInitialWalkthrough();
+  const advanceWalkthrough = useCallback((stepKey?: string): WalkthroughState => {
+    let updated: WalkthroughState | undefined;
+    setDraftState(prev => {
+      const wt = prev.walkthrough ?? createInitialWalkthrough();
 
-        // If a specific step key is given, mark it completed.
-        let steps = wt.steps;
-        if (stepKey) {
-          steps = steps.map((s) =>
-            s.key === stepKey ? { ...s, completed: true } : s
-          );
+      // If a specific step key is given, mark it completed.
+      let steps = wt.steps;
+      if (stepKey) {
+        steps = steps.map(s => (s.key === stepKey ? { ...s, completed: true } : s));
+      }
+
+      // Determine if all steps in current phase are done.
+      const allDone = steps.every(s => s.completed);
+
+      // Advance to next phase if all steps are completed.
+      let nextPhase: WalkthroughPhase = wt.phase;
+      if (allDone) {
+        const currentIdx = WALKTHROUGH_PHASES.indexOf(wt.phase);
+        if (currentIdx < WALKTHROUGH_PHASES.length - 1) {
+          nextPhase = WALKTHROUGH_PHASES[currentIdx + 1];
         }
+      }
 
-        // Determine if all steps in current phase are done.
-        const allDone = steps.every((s) => s.completed);
-
-        // Advance to next phase if all steps are completed.
-        let nextPhase: WalkthroughPhase = wt.phase;
-        if (allDone) {
-          const currentIdx = WALKTHROUGH_PHASES.indexOf(wt.phase);
-          if (currentIdx < WALKTHROUGH_PHASES.length - 1) {
-            nextPhase = WALKTHROUGH_PHASES[currentIdx + 1];
-          }
+      // Load steps for the next phase.
+      let nextSteps = steps;
+      if (nextPhase !== wt.phase) {
+        if (nextPhase === 'connect') {
+          nextSteps = CONNECT_STEPS;
+        } else if (nextPhase === 'automate') {
+          nextSteps = AUTOMATE_STEPS;
+        } else if (nextPhase === 'review' || nextPhase === 'done') {
+          nextSteps = [];
         }
+      }
 
-        // Load steps for the next phase.
-        let nextSteps = steps;
-        if (nextPhase !== wt.phase) {
-          if (nextPhase === 'connect') {
-            nextSteps = CONNECT_STEPS;
-          } else if (nextPhase === 'automate') {
-            nextSteps = AUTOMATE_STEPS;
-          } else if (nextPhase === 'review' || nextPhase === 'done') {
-            nextSteps = [];
-          }
-        }
+      updated = {
+        phase: nextPhase,
+        steps: nextSteps,
+        completed: nextPhase === 'done',
+        skipped: wt.skipped,
+      };
 
-        updated = {
-          phase: nextPhase,
-          steps: nextSteps,
-          completed: nextPhase === 'done',
-          skipped: wt.skipped,
-        };
-
-        return { ...prev, walkthrough: updated };
-      });
-      return updated!;
-    },
-    []
-  );
+      return { ...prev, walkthrough: updated };
+    });
+    return updated!;
+  }, []);
 
   const skipWalkthrough = useCallback(() => {
-    setDraftState((prev) => ({
+    setDraftState(prev => ({
       ...prev,
-      walkthrough: {
-        phase: 'review',
-        steps: [],
-        completed: false,
-        skipped: true,
-      },
+      walkthrough: { phase: 'review', steps: [], completed: false, skipped: true },
     }));
   }, []);
 

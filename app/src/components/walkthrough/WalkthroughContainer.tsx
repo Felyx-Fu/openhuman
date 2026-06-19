@@ -20,8 +20,7 @@ const WalkthroughContainer = () => {
     <WalkthroughProvider
       state={walkthrough}
       onAdvance={advanceWalkthrough}
-      onSkip={skipWalkthrough}
-    >
+      onSkip={skipWalkthrough}>
       <WalkthroughPhasePanel />
     </WalkthroughProvider>
   );

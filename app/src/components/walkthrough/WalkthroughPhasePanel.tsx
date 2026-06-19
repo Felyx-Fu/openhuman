@@ -1,7 +1,7 @@
 import { useT } from '../../lib/i18n/I18nContext';
-import { useWalkthroughUI } from './WalkthroughProvider';
 import WalkthroughActionCard from './WalkthroughActionCard';
 import WalkthroughProgressBar from './WalkthroughProgressBar';
+import { useWalkthroughUI } from './WalkthroughProvider';
 
 /**
  * Renders the current walkthrough phase: progress bar, phase header with icon
@@ -58,7 +58,10 @@ const WalkthroughPhasePanel = () => {
           {steps.length === 0 && (
             <p className="text-sm text-stone-400 dark:text-neutral-500 text-center py-4">
               {state.skipped
-                ? t('walkthrough.review.skipped', 'You skipped the setup. You can configure these anytime in Settings.')
+                ? t(
+                    'walkthrough.review.skipped',
+                    'You skipped the setup. You can configure these anytime in Settings.'
+                  )
                 : t('walkthrough.review.empty', 'No actions completed yet.')}
             </p>
           )}
@@ -106,7 +109,7 @@ const WalkthroughPhasePanel = () => {
 
       {/* Action cards */}
       <div className="space-y-2 mb-6">
-        {steps.map((step) => (
+        {steps.map(step => (
           <WalkthroughActionCard key={step.key} step={step} />
         ))}
       </div>
@@ -116,8 +119,7 @@ const WalkthroughPhasePanel = () => {
         <button
           type="button"
           onClick={skip}
-          className="text-xs text-stone-400 dark:text-neutral-500 hover:text-stone-600 dark:hover:text-neutral-300 transition-colors underline underline-offset-2"
-        >
+          className="text-xs text-stone-400 dark:text-neutral-500 hover:text-stone-600 dark:hover:text-neutral-300 transition-colors underline underline-offset-2">
           {t('walkthrough.phase.skip', 'Skip this step')}
         </button>
       </div>

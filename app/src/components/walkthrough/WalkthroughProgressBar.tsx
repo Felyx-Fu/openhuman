@@ -1,5 +1,5 @@
-import { useWalkthroughUI } from './WalkthroughProvider';
 import type { WalkthroughPhase } from '../../pages/onboarding/OnboardingContext';
+import { useWalkthroughUI } from './WalkthroughProvider';
 
 const PHASE_ORDER: WalkthroughPhase[] = ['welcome', 'connect', 'automate', 'review', 'done'];
 
@@ -14,7 +14,12 @@ const WalkthroughProgressBar = () => {
   const currentIdx = PHASE_ORDER.indexOf(state.phase);
 
   return (
-    <div className="flex items-center gap-1 mb-6" role="progressbar" aria-valuenow={currentIdx + 1} aria-valuemin={1} aria-valuemax={PHASE_ORDER.length}>
+    <div
+      className="flex items-center gap-1 mb-6"
+      role="progressbar"
+      aria-valuenow={currentIdx + 1}
+      aria-valuemin={1}
+      aria-valuemax={PHASE_ORDER.length}>
       {PHASE_ORDER.map((phase, idx) => {
         const isCompleted = idx < currentIdx;
         const isCurrent = idx === currentIdx;
@@ -31,8 +36,7 @@ const WalkthroughProgressBar = () => {
                 ${isCurrent ? 'bg-[#2F6EF4] text-white ring-2 ring-[#2F6EF4]/30' : ''}
                 ${isFuture ? 'bg-stone-200 dark:bg-neutral-700 text-stone-400 dark:text-neutral-500' : ''}
               `}
-              aria-label={`${phaseLabels[phase]}${isCompleted ? ' (completed)' : isCurrent ? ' (current)' : ''}`}
-            >
+              aria-label={`${phaseLabels[phase]}${isCompleted ? ' (completed)' : isCurrent ? ' (current)' : ''}`}>
               {isCompleted ? '✓' : phaseIcons[phase]}
             </div>
 
