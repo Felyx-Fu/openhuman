@@ -4634,7 +4634,7 @@ const messages: TranslationMap = {
   'walkthrough.tooltip.next': '下一步 →',
   'walkthrough.tooltip.skip': '跳过引导',
   'walkthrough.tooltip.stepCounter': '{n} / {total}',
-  // Walkthrough product tour steps — narrative-driven onboarding guide
+  // ── Walkthrough product tour steps (a03) ──────────────────────────────
   'walkthrough.steps.welcome.title': '欢迎使用 OpenHuman',
   'walkthrough.steps.welcome.content':
     '让我们快速了解一下你的新 AI 助手。只需几步就能掌握核心功能。',
@@ -4666,6 +4666,45 @@ const messages: TranslationMap = {
   'walkthrough.steps.allSet.title': '一切就绪！',
   'walkthrough.steps.allSet.content':
     '你的助手给你留了一条欢迎消息 — 这是你的空间，可以聊天、提问或头脑风暴。玩得开心！',
+  // ── Integrated walkthrough phases (a03) ────────────────────────────────
+  'walkthrough.phase.welcome': '欢迎',
+  'walkthrough.phase.connect': '连接',
+  'walkthrough.phase.automate': '自动化',
+  'walkthrough.phase.review': '回顾',
+  'walkthrough.phase.done': '完成',
+  'walkthrough.phase.skip': '跳过此步骤',
+  // ── Walkthrough step labels (a03) ──────────────────────────────────────
+  'walkthrough.step.gmail': 'Gmail',
+  'walkthrough.step.slack': 'Slack',
+  'walkthrough.step.whatsapp': 'WhatsApp',
+  'walkthrough.step.telegram': 'Telegram',
+  'walkthrough.step.discord': 'Discord',
+  'walkthrough.step.briefings': '每日简报',
+  'walkthrough.step.notifications': '智能通知',
+  'walkthrough.step.scheduling': '自动排程',
+  'walkthrough.step.summaries': '会议摘要',
+  // ── Walkthrough step descriptions (a03) ────────────────────────────────
+  'walkthrough.desc.gmail': '连接邮箱，获取智能回复和摘要',
+  'walkthrough.desc.slack': '让助手加入你的团队对话',
+  'walkthrough.desc.whatsapp': '随时随地与助手聊天',
+  'walkthrough.desc.telegram': '通过 Telegram 安全地与 AI 沟通',
+  'walkthrough.desc.discord': '将助手带入你的 Discord 服务器',
+  'walkthrough.desc.briefings': '获取每日重要事项摘要',
+  'walkthrough.desc.notifications': '不错过重要信息，过滤噪音',
+  'walkthrough.desc.scheduling': '让 AI 帮你管理日程',
+  'walkthrough.desc.summaries': '不再错过任何会议细节',
+  // ── Walkthrough card aria labels (a03) ─────────────────────────────────
+  'walkthrough.card.completedAria': '{label} — 已完成',
+  'walkthrough.card.actionAria': '完成 {label}',
+  // ── Walkthrough phase descriptions (a03) ───────────────────────────────
+  'walkthrough.welcome.description': '让我们引导你完成 AI 助手的设置。',
+  'walkthrough.connect.description': '连接你常用的工具，每个连接都为助手增添新能力。',
+  'walkthrough.automate.description': '选择助手应自动处理的事项。',
+  'walkthrough.review.description': '以下是你已设置的摘要，你可以随时在设置中更改。',
+  'walkthrough.review.skipped': '你跳过了设置，可以随时在设置中配置这些选项。',
+  'walkthrough.review.empty': '尚未完成任何操作。',
+  'walkthrough.done.title': '一切就绪！',
+  'walkthrough.done.description': '你的助手已准备好为你服务。连接已建立，自动化已配置。'
   'webhooks.activity.empty': '暂无活动',
   'webhooks.activity.title': '最近活动',
   'webhooks.composioHistory.empty': '暂无记录',

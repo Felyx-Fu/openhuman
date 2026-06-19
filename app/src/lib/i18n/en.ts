@@ -5489,7 +5489,7 @@ const en: TranslationMap = {
   'walkthrough.tooltip.next': 'Next →',
   'walkthrough.tooltip.skip': 'Skip tour',
   'walkthrough.tooltip.stepCounter': '{n} of {total}',
-  // Walkthrough product tour steps — narrative-driven onboarding guide
+  // ── Walkthrough product tour steps (a03) ──────────────────────────────
   'walkthrough.steps.welcome.title': 'Welcome to OpenHuman',
   'walkthrough.steps.welcome.content':
     "Let's take a quick tour of your new AI assistant. We'll cover the essentials in just a few steps.",
@@ -5523,6 +5523,45 @@ const en: TranslationMap = {
   'walkthrough.steps.allSet.title': "You're All Set!",
   'walkthrough.steps.allSet.content':
     'Your assistant left you a welcome note — this is your space to chat, ask questions, or brainstorm. Have fun!',
+  // ── Integrated walkthrough phases (a03) ────────────────────────────────
+  'walkthrough.phase.welcome': 'Welcome',
+  'walkthrough.phase.connect': 'Connect',
+  'walkthrough.phase.automate': 'Automate',
+  'walkthrough.phase.review': 'Review',
+  'walkthrough.phase.done': 'Done',
+  'walkthrough.phase.skip': 'Skip this step',
+  // ── Walkthrough step labels (a03) ──────────────────────────────────────
+  'walkthrough.step.gmail': 'Gmail',
+  'walkthrough.step.slack': 'Slack',
+  'walkthrough.step.whatsapp': 'WhatsApp',
+  'walkthrough.step.telegram': 'Telegram',
+  'walkthrough.step.discord': 'Discord',
+  'walkthrough.step.briefings': 'Daily Briefings',
+  'walkthrough.step.notifications': 'Smart Notifications',
+  'walkthrough.step.scheduling': 'Auto Scheduling',
+  'walkthrough.step.summaries': 'Meeting Summaries',
+  // ── Walkthrough step descriptions (a03) ────────────────────────────────
+  'walkthrough.desc.gmail': 'Connect your email for smart replies and summaries',
+  'walkthrough.desc.slack': 'Let your assistant join your team conversations',
+  'walkthrough.desc.whatsapp': 'Chat with your assistant on the go',
+  'walkthrough.desc.telegram': 'Secure messaging with your AI',
+  'walkthrough.desc.discord': 'Bring your assistant to your server',
+  'walkthrough.desc.briefings': 'Get a daily summary of what matters',
+  'walkthrough.desc.notifications': 'Stay informed without the noise',
+  'walkthrough.desc.scheduling': 'Let AI handle your calendar',
+  'walkthrough.desc.summaries': 'Never miss a meeting detail again',
+  // ── Walkthrough card aria labels (a03) ─────────────────────────────────
+  'walkthrough.card.completedAria': '{label} — completed',
+  'walkthrough.card.actionAria': 'Complete {label}',
+  // ── Walkthrough phase descriptions (a03) ───────────────────────────────
+  'walkthrough.welcome.description': 'Let us guide you through setting up your AI assistant.',
+  'walkthrough.connect.description': 'Connect the tools you already use. Each connection gives your assistant new abilities.',
+  'walkthrough.automate.description': 'Choose what your assistant should handle automatically.',
+  'walkthrough.review.description': "Here's a summary of what you've set up. You can always change these later.",
+  'walkthrough.review.skipped': 'You skipped the setup. You can configure these anytime in Settings.',
+  'walkthrough.review.empty': 'No actions completed yet.',
+  'walkthrough.done.title': "You're all set!",
+  'walkthrough.done.description': 'Your assistant is ready to help. Connections are set up and automations are configured.'
   'webhooks.activity.empty': 'No recent activity',
   'webhooks.activity.title': 'Recent Activity',
   'webhooks.composioHistory.empty': 'Empty',
