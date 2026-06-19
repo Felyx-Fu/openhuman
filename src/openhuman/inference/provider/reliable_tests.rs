@@ -64,6 +64,57 @@ impl Provider for ModelAwareMock {
     }
 }
 
+struct LocalityMock {
+    model_seen: parking_lot::Mutex<String>,
+    guard_window: Option<u64>,
+}
+
+#[async_trait]
+impl Provider for LocalityMock {
+    async fn chat_with_system(
+        &self,
+        _system_prompt: Option<&str>,
+        _message: &str,
+        model: &str,
+        _temperature: f64,
+    ) -> anyhow::Result<String> {
+        *self.model_seen.lock() = model.to_string();
+        Ok("ok".into())
+    }
+
+    async fn local_prefix_guard_context_window(&self, model: &str) -> Option<u64> {
+        *self.model_seen.lock() = model.to_string();
+        self.guard_window
+    }
+
+    fn is_local_provider(&self) -> bool {
+        self.guard_window.is_some()
+    }
+}
+
+#[async_trait]
+impl Provider for Arc<LocalityMock> {
+    async fn chat_with_system(
+        &self,
+        system_prompt: Option<&str>,
+        message: &str,
+        model: &str,
+        temperature: f64,
+    ) -> anyhow::Result<String> {
+        self.as_ref()
+            .chat_with_system(system_prompt, message, model, temperature)
+            .await
+    }
+
+    async fn local_prefix_guard_context_window(&self, model: &str) -> Option<u64> {
+        self.as_ref().local_prefix_guard_context_window(model).await
+    }
+
+    fn is_local_provider(&self) -> bool {
+        self.as_ref().is_local_provider()
+    }
+}
+
 // ── Existing tests (preserved) ──
 
 #[tokio::test]
@@ -807,6 +858,31 @@ async fn model_failover_all_models_fail() {
 
     let seen = mock.models_seen.lock();
     assert_eq!(seen.len(), 3);
+}
+
+#[tokio::test]
+async fn locality_delegates_to_primary_provider_with_model() {
+    let primary = Arc::new(LocalityMock {
+        model_seen: parking_lot::Mutex::new(String::new()),
+        guard_window: Some(8192),
+    });
+    let provider = ReliableProvider::new(
+        vec![(
+            "primary".into(),
+            Box::new(Arc::clone(&primary)) as Box<dyn Provider>,
+        )],
+        0,
+        1,
+    );
+
+    assert!(provider.is_local_provider_for_model("qwen-local"));
+    assert_eq!(
+        provider
+            .local_prefix_guard_context_window("qwen-local")
+            .await,
+        Some(8192)
+    );
+    assert_eq!(&*primary.model_seen.lock(), "qwen-local");
 }
 
 #[tokio::test]

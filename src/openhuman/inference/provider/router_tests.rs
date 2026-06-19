@@ -6,6 +6,8 @@ struct MockProvider {
     calls: Arc<AtomicUsize>,
     response: &'static str,
     last_model: parking_lot::Mutex<String>,
+    is_local: bool,
+    guard_window: Option<u64>,
 }
 
 impl MockProvider {
@@ -14,6 +16,18 @@ impl MockProvider {
             calls: Arc::new(AtomicUsize::new(0)),
             response,
             last_model: parking_lot::Mutex::new(String::new()),
+            is_local: false,
+            guard_window: None,
+        }
+    }
+
+    fn local(response: &'static str, guard_window: Option<u64>) -> Self {
+        Self {
+            calls: Arc::new(AtomicUsize::new(0)),
+            response,
+            last_model: parking_lot::Mutex::new(String::new()),
+            is_local: true,
+            guard_window,
         }
     }
 
@@ -38,6 +52,15 @@ impl Provider for MockProvider {
         self.calls.fetch_add(1, Ordering::SeqCst);
         *self.last_model.lock() = model.to_string();
         Ok(self.response.to_string())
+    }
+
+    async fn local_prefix_guard_context_window(&self, model: &str) -> Option<u64> {
+        *self.last_model.lock() = model.to_string();
+        self.guard_window
+    }
+
+    fn is_local_provider(&self) -> bool {
+        self.is_local
     }
 }
 
@@ -92,6 +115,14 @@ impl Provider for Arc<MockProvider> {
         self.as_ref()
             .chat_with_system(system_prompt, message, model, temperature)
             .await
+    }
+
+    async fn local_prefix_guard_context_window(&self, model: &str) -> Option<u64> {
+        self.as_ref().local_prefix_guard_context_window(model).await
+    }
+
+    fn is_local_provider(&self) -> bool {
+        self.as_ref().is_local_provider()
     }
 }
 
@@ -394,4 +425,45 @@ async fn chat_with_tools_routes_hint_correctly() {
     assert_eq!(mocks[1].call_count(), 1);
     assert_eq!(mocks[1].last_model(), "claude-opus");
     assert_eq!(mocks[0].call_count(), 0);
+}
+
+#[tokio::test]
+async fn locality_delegates_to_resolved_provider_for_model() {
+    let cloud = Arc::new(MockProvider::new("cloud"));
+    let local = Arc::new(MockProvider::local("local", Some(4096)));
+    let providers: Vec<(String, Box<dyn Provider>)> = vec![
+        (
+            "cloud".into(),
+            Box::new(Arc::clone(&cloud)) as Box<dyn Provider>,
+        ),
+        (
+            "local".into(),
+            Box::new(Arc::clone(&local)) as Box<dyn Provider>,
+        ),
+    ];
+    let routes = vec![(
+        "coding".to_string(),
+        Route {
+            provider_name: "local".into(),
+            model: "qwen2.5-7b".into(),
+            context_window: None,
+        },
+    )];
+    let router = RouterProvider::new(providers, routes, "gpt-4o".into());
+
+    assert!(
+        !router.is_local_provider_for_model("gpt-4o"),
+        "default cloud provider must stay non-local"
+    );
+    assert!(
+        router.is_local_provider_for_model("hint:coding"),
+        "routed local model must be classified through the resolved provider"
+    );
+    assert_eq!(
+        router
+            .local_prefix_guard_context_window("hint:coding")
+            .await,
+        Some(4096)
+    );
+    assert_eq!(local.last_model(), "qwen2.5-7b");
 }

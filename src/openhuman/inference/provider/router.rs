@@ -244,6 +244,14 @@ impl Provider for RouterProvider {
         provider.effective_context_window(&resolved_model).await
     }
 
+    async fn local_prefix_guard_context_window(&self, model: &str) -> Option<u64> {
+        let (provider_idx, resolved_model) = self.resolve(model);
+        let (_, provider) = &self.providers[provider_idx];
+        provider
+            .local_prefix_guard_context_window(&resolved_model)
+            .await
+    }
+
     /// Delegate to the resolved provider so the engine's pre-dispatch
     /// un-evictable-prefix guard fires for a routed local model (#3550).
     fn is_local_provider(&self) -> bool {
@@ -251,6 +259,12 @@ impl Provider for RouterProvider {
             .get(self.default_index)
             .map(|(_, p)| p.is_local_provider())
             .unwrap_or(false)
+    }
+
+    fn is_local_provider_for_model(&self, model: &str) -> bool {
+        let (provider_idx, resolved_model) = self.resolve(model);
+        let (_, provider) = &self.providers[provider_idx];
+        provider.is_local_provider_for_model(&resolved_model)
     }
 
     async fn warmup(&self) -> anyhow::Result<()> {

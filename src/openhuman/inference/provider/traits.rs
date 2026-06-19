@@ -538,6 +538,19 @@ pub trait Provider: Send + Sync {
         crate::openhuman::inference::context_window_for_model(model)
     }
 
+    /// Runtime context window that is authoritative enough for the local
+    /// `n_keep >= n_ctx` hard-fail guard.
+    ///
+    /// This intentionally differs from [`Self::effective_context_window`]:
+    /// trimming may use conservative local fallbacks to keep a prompt bounded,
+    /// but the engine should only abort before dispatch when the provider has
+    /// reported the loaded runtime window. A guessed floor would false-fail
+    /// larger local runtimes.
+    async fn local_prefix_guard_context_window(&self, model: &str) -> Option<u64> {
+        let _ = model;
+        None
+    }
+
     /// Whether this provider talks to a **local** runtime (LM Studio, Ollama,
     /// llama.cpp, vLLM, …) rather than a cloud API. Local runtimes enforce the
     /// model's *runtime-loaded* `n_ctx` and can be loaded with a window smaller
@@ -550,6 +563,12 @@ pub trait Provider: Send + Sync {
     /// Defaults to `false`.
     fn is_local_provider(&self) -> bool {
         false
+    }
+
+    /// Model-aware local-provider classification for routers and wrappers.
+    fn is_local_provider_for_model(&self, model: &str) -> bool {
+        let _ = model;
+        self.is_local_provider()
     }
 
     /// Warm up the HTTP connection pool (TLS handshake, DNS, HTTP/2 setup).

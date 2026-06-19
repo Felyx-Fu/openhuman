@@ -161,7 +161,8 @@ pub struct ContextPrefixTooLargeError {
 }
 
 /// Detect the [`ContextPrefixTooLargeError`] condition: after a maximal trim the
-/// un-evictable prefix still overflows the input budget for `context_window`.
+/// un-evictable prefix still overflows the runtime context window
+/// (`n_keep >= n_ctx`) for `context_window`.
 /// Returns `Some(err)` when the prompt can never fit (so the caller should
 /// surface the actionable error instead of dispatching to the provider), `None`
 /// when trimming can keep the prompt within budget.
@@ -171,7 +172,7 @@ pub fn unevictable_prefix_overflow(
 ) -> Option<ContextPrefixTooLargeError> {
     let max_input = max_input_tokens(context_window);
     let prefix_tokens = unevictable_prefix_tokens(messages);
-    (prefix_tokens as u64 > max_input).then_some(ContextPrefixTooLargeError {
+    (prefix_tokens as u64 >= context_window).then_some(ContextPrefixTooLargeError {
         prefix_tokens,
         context_window,
         max_input_tokens: max_input,
@@ -429,8 +430,8 @@ mod tests {
             .expect("un-evictable prefix overflow must be detected");
         assert_eq!(overflow.context_window, ctx);
         assert!(
-            overflow.prefix_tokens as u64 > overflow.max_input_tokens,
-            "prefix must exceed the input budget"
+            overflow.prefix_tokens as u64 >= overflow.context_window,
+            "prefix must meet or exceed the runtime context window"
         );
         // The user-facing remedy + the diagnostic anchor are both present.
         let msg = overflow.to_string();
@@ -450,6 +451,24 @@ mod tests {
         // guard must NOT fire (no false-positive actionable error).
         let messages = vec![ChatMessage::system("short system"), user_msg("hello")];
         assert!(unevictable_prefix_overflow(&messages, 8_192).is_none());
+    }
+
+    #[test]
+    fn unevictable_prefix_overflow_allows_prefix_between_input_budget_and_context_window() {
+        let ctx: u64 = 8_192;
+        let max_input = max_input_tokens(ctx);
+        // ~7k prefix tokens: larger than the input budget after output reserve,
+        // but still below the loaded n_ctx. This may leave little room for
+        // output, but it is not the upstream `n_keep >= n_ctx` hard failure.
+        let prefix_chars = ((max_input + 256) * 4) as usize;
+        let messages = vec![
+            ChatMessage::system(&"s".repeat(prefix_chars)),
+            user_msg("hi"),
+        ];
+        let prefix = unevictable_prefix_tokens(&messages) as u64;
+        assert!(prefix > max_input, "test must exceed derived input budget");
+        assert!(prefix < ctx, "test must stay below n_ctx");
+        assert!(unevictable_prefix_overflow(&messages, ctx).is_none());
     }
 
     #[test]

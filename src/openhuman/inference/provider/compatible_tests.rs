@@ -3631,3 +3631,50 @@ async fn effective_context_window_lmstudio_falls_back_when_native_unavailable() 
         Some(8_192)
     );
 }
+
+#[tokio::test]
+async fn local_prefix_guard_window_lmstudio_uses_only_loaded_window() {
+    use crate::openhuman::inference::local::profile::LocalProviderKind;
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/v0/models"))
+        .respond_with(ResponseTemplate::new(200).set_body_raw(
+            r#"{"data":[{"id":"qwen2.5-7b","loaded_context_length":4096,"max_context_length":32768}]}"#,
+            "application/json",
+        ))
+        .mount(&server)
+        .await;
+    let p = OpenAiCompatibleProvider::new("lmstudio", &server.uri(), None, AuthStyle::None)
+        .with_local_provider_kind(LocalProviderKind::LmStudio);
+
+    assert_eq!(
+        p.local_prefix_guard_context_window("qwen2.5-7b").await,
+        Some(4096),
+        "hard prefix guard should use the runtime-loaded n_ctx when LM Studio reports it"
+    );
+}
+
+#[tokio::test]
+async fn local_prefix_guard_window_skips_lmstudio_fallback_guess() {
+    use crate::openhuman::inference::local::profile::LocalProviderKind;
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/v0/models"))
+        .respond_with(ResponseTemplate::new(404))
+        .mount(&server)
+        .await;
+    let p = OpenAiCompatibleProvider::new("lmstudio", &server.uri(), None, AuthStyle::None)
+        .with_local_provider_kind(LocalProviderKind::LmStudio);
+
+    assert_eq!(
+        p.effective_context_window("unknown-local-model").await,
+        Some(8_192),
+        "trimming may still use the profile fallback"
+    );
+    assert_eq!(
+        p.local_prefix_guard_context_window("unknown-local-model")
+            .await,
+        None,
+        "hard prefix guard must not treat a fallback guess as authoritative n_ctx"
+    );
+}

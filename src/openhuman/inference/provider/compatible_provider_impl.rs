@@ -1261,6 +1261,14 @@ impl Provider for OpenAiCompatibleProvider {
         self.local_provider_kind.is_some()
     }
 
+    async fn local_prefix_guard_context_window(&self, model: &str) -> Option<u64> {
+        use crate::openhuman::inference::local::profile::LocalProviderKind;
+        match self.local_provider_kind {
+            Some(LocalProviderKind::LmStudio) => self.lm_studio_loaded_context_window(model).await,
+            _ => None,
+        }
+    }
+
     /// Resolve the effective context window for pre-dispatch trimming.
     ///
     /// For cloud (non-local) providers this is the static model table. For

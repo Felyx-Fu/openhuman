@@ -460,12 +460,26 @@ impl Provider for ReliableProvider {
         }
     }
 
+    async fn local_prefix_guard_context_window(&self, model: &str) -> Option<u64> {
+        match self.providers.first() {
+            Some((_, provider)) => provider.local_prefix_guard_context_window(model).await,
+            None => None,
+        }
+    }
+
     /// Delegate to the primary provider so the engine's pre-dispatch
     /// un-evictable-prefix guard fires for a wrapped local model (#3550).
     fn is_local_provider(&self) -> bool {
         self.providers
             .first()
             .map(|(_, p)| p.is_local_provider())
+            .unwrap_or(false)
+    }
+
+    fn is_local_provider_for_model(&self, model: &str) -> bool {
+        self.providers
+            .first()
+            .map(|(_, p)| p.is_local_provider_for_model(model))
             .unwrap_or(false)
     }
 

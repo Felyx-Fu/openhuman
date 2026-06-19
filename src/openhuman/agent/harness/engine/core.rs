@@ -137,6 +137,26 @@ pub(crate) async fn run_turn_engine(
             "[agent_loop] effective context window unavailable (cloud unknown model); pre-dispatch trimming skipped this turn"
         ),
     }
+    let model_is_local_provider = provider.is_local_provider_for_model(model);
+    let local_prefix_guard_context_window = provider.local_prefix_guard_context_window(model).await;
+    match local_prefix_guard_context_window {
+        Some(context_window) => tracing::debug!(
+            provider = provider_name,
+            model,
+            context_window,
+            "[agent_loop] authoritative local prefix guard context window resolved"
+        ),
+        None if model_is_local_provider => tracing::debug!(
+            provider = provider_name,
+            model,
+            "[agent_loop] local provider has no authoritative prefix guard context window; hard prefix overflow guard skipped"
+        ),
+        None => tracing::trace!(
+            provider = provider_name,
+            model,
+            "[agent_loop] non-local provider; hard prefix overflow guard skipped"
+        ),
+    }
     let mut context_guard = effective_context_window
         .map(ContextGuard::with_context_window)
         .unwrap_or_else(ContextGuard::new);
@@ -444,7 +464,7 @@ pub(crate) async fn run_turn_engine(
             // expected user-state condition (S3.5: preventable-user-state), so it
             // is demoted from Sentry via `report_error_or_expected` (its Display
             // string matches `is_context_window_exceeded_message`).
-            if provider.is_local_provider() {
+            if let Some(context_window) = local_prefix_guard_context_window {
                 if let Some(prefix_err) =
                     crate::openhuman::agent::harness::token_budget::unevictable_prefix_overflow(
                         &prepared_messages_vec,

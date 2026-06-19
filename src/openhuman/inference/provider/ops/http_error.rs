@@ -343,7 +343,15 @@ pub fn is_context_window_exceeded_message(body: &str) -> bool {
         // a larger context), so this is expected user-state, not a product bug.
         "greater than the context length",
     ];
-    if CONTEXT_HINTS.iter().any(|hint| lower.contains(hint)) {
+    if let Some(hint) = CONTEXT_HINTS.iter().find(|hint| lower.contains(**hint)) {
+        tracing::trace!(
+            domain = "llm_provider",
+            operation = "http_error_classifier",
+            classifier = "context_window_exceeded",
+            matched = true,
+            matched_hint = *hint,
+            "[llm_provider] context-window classifier matched context phrase"
+        );
         return true;
     }
 
@@ -351,6 +359,14 @@ pub fn is_context_window_exceeded_message(body: &str) -> bool {
     // diagnostic. Require BOTH tokens so the arm stays anchored to that exact
     // shape (TAURI-RUST-6V0) and never broadens to unrelated `n_ctx` logging.
     if lower.contains("n_keep") && lower.contains("n_ctx") {
+        tracing::trace!(
+            domain = "llm_provider",
+            operation = "http_error_classifier",
+            classifier = "context_window_exceeded",
+            matched = true,
+            matched_hint = "n_keep+n_ctx",
+            "[llm_provider] context-window classifier matched paired n_keep/n_ctx diagnostic"
+        );
         return true;
     }
 
