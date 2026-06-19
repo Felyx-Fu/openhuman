@@ -2,6 +2,8 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { CoreRpcError } from '../../../services/coreRpcClient';
+
 const navigateBack = vi.fn();
 const navigateToTeamManagement = vi.fn();
 
@@ -161,8 +163,46 @@ describe('<TeamPanel />', () => {
     expect(navigateToTeamManagement).toHaveBeenCalledWith('team-a');
   });
 
-  it('surfaces the localized error when createTeam rejects', async () => {
-    teamApiMock.createTeam.mockRejectedValueOnce(new Error('boom'));
+  // #3723 — the create-team handler used to check `'error' in err`, which never
+  // matches the real `CoreRpcError` (its text is on `.message`), so every
+  // failure collapsed to the generic banner and hid the real cause. The handler
+  // now surfaces the real message and only falls back when there's nothing
+  // usable.
+
+  it('surfaces the real CoreRpcError message when createTeam rejects (#3723)', async () => {
+    teamApiMock.createTeam.mockRejectedValueOnce(
+      new CoreRpcError(
+        'SESSION_EXPIRED: backend rejected session token on POST /teams',
+        'auth_expired',
+        401
+      )
+    );
+    const Panel = await importPanel();
+    renderPanel(Panel);
+
+    fireEvent.change(screen.getByPlaceholderText('Team name'), { target: { value: 'New Team' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Create' }));
+    await waitFor(() =>
+      expect(
+        screen.getByText('SESSION_EXPIRED: backend rejected session token on POST /teams')
+      ).toBeInTheDocument()
+    );
+    // The opaque generic banner must NOT be what the user sees.
+    expect(screen.queryByText('Failed to create team')).not.toBeInTheDocument();
+  });
+
+  it('surfaces a plain Error message when createTeam rejects', async () => {
+    teamApiMock.createTeam.mockRejectedValueOnce(new Error('Team limit reached'));
+    const Panel = await importPanel();
+    renderPanel(Panel);
+
+    fireEvent.change(screen.getByPlaceholderText('Team name'), { target: { value: 'New Team' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Create' }));
+    await waitFor(() => expect(screen.getByText('Team limit reached')).toBeInTheDocument());
+  });
+
+  it('falls back to the localized banner when the error carries no message', async () => {
+    teamApiMock.createTeam.mockRejectedValueOnce({});
     const Panel = await importPanel();
     renderPanel(Panel);
 
