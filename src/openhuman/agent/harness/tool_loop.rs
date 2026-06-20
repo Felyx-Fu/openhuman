@@ -232,8 +232,8 @@ impl RepeatFailureGuard {
             return Some(match kind {
                 TerminalInferenceFailure::BudgetExhausted => format!(
                     "Stopping: the `{tool}` step failed because the account is out of inference \
-                     budget/credits — every retry hits the same wall. Add credits to your account \
-                     and try again. Details:\n{}",
+                     budget/credits — every retry hits the same wall. Top up the relevant account \
+                     (OpenHuman or your configured provider), then try again. Details:\n{}",
                     truncate_for_halt(result),
                 ),
                 TerminalInferenceFailure::ProviderConfig => format!(
