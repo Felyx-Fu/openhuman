@@ -5702,6 +5702,12 @@ const messages: TranslationMap = {
   'settings.profiles.editor.notFound': 'الملف غير موجود',
   'settings.profiles.editor.saving': 'جارٍ الحفظ…',
   'settings.profiles.editor.idRequired': 'لا يمكن أن يكون معرّف الملف فارغًا',
+  // Onboarding walkthrough review follow-up
+  'onboarding.welcome.logoAlt': 'شعار OpenHuman',
+  'walkthrough.progress.completed': 'مكتمل',
+  'walkthrough.progress.current': 'الحالي',
+  'walkthrough.step.start': 'بدء الإعداد',
+  'walkthrough.desc.start': 'راجع الجولة وابدأ بربط مساعدك',
 };
 
 export default messages;

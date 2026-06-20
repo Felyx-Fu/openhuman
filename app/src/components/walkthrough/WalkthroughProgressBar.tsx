@@ -1,3 +1,4 @@
+import { useT } from '../../lib/i18n/I18nContext';
 import type { WalkthroughPhase } from '../../pages/onboarding/OnboardingContext';
 import { useWalkthroughUI } from './WalkthroughProvider';
 
@@ -10,8 +11,11 @@ const PHASE_ORDER: WalkthroughPhase[] = ['welcome', 'connect', 'automate', 'revi
  */
 const WalkthroughProgressBar = () => {
   const { state, phaseLabels, phaseIcons } = useWalkthroughUI();
+  const { t } = useT();
 
   const currentIdx = PHASE_ORDER.indexOf(state.phase);
+  const completedLabel = t('walkthrough.progress.completed', 'completed');
+  const currentLabel = t('walkthrough.progress.current', 'current');
 
   return (
     <div
@@ -36,7 +40,9 @@ const WalkthroughProgressBar = () => {
                 ${isCurrent ? 'bg-[#2F6EF4] text-white ring-2 ring-[#2F6EF4]/30' : ''}
                 ${isFuture ? 'bg-stone-200 dark:bg-neutral-700 text-stone-400 dark:text-neutral-500' : ''}
               `}
-              aria-label={`${phaseLabels[phase]}${isCompleted ? ' (completed)' : isCurrent ? ' (current)' : ''}`}>
+              aria-label={`${phaseLabels[phase]}${
+                isCompleted ? ` (${completedLabel})` : isCurrent ? ` (${currentLabel})` : ''
+              }`}>
               {isCompleted ? '✓' : phaseIcons[phase]}
             </div>
 

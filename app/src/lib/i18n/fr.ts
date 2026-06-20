@@ -5964,6 +5964,12 @@ const messages: TranslationMap = {
   'settings.profiles.editor.notFound': 'Profil introuvable',
   'settings.profiles.editor.saving': 'Enregistrement…',
   'settings.profiles.editor.idRequired': "L'identifiant du profil ne peut pas être vide",
+  // Onboarding walkthrough review follow-up
+  'onboarding.welcome.logoAlt': 'Logo OpenHuman',
+  'walkthrough.progress.completed': 'terminé',
+  'walkthrough.progress.current': 'actuel',
+  'walkthrough.step.start': 'Commencer la configuration',
+  'walkthrough.desc.start': 'Parcourez la visite guidée et commencez à connecter votre assistant',
 };
 
 export default messages;

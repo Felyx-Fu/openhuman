@@ -5525,6 +5525,12 @@ const messages: TranslationMap = {
   'settings.profiles.editor.notFound': '未找到配置',
   'settings.profiles.editor.saving': '正在保存…',
   'settings.profiles.editor.idRequired': '配置标识不能为空',
+  // Onboarding walkthrough review follow-up
+  'onboarding.welcome.logoAlt': 'OpenHuman 标志',
+  'walkthrough.progress.completed': '已完成',
+  'walkthrough.progress.current': '当前',
+  'walkthrough.step.start': '开始设置',
+  'walkthrough.desc.start': '先浏览引导，然后开始连接你的助手',
 };
 
 export default messages;

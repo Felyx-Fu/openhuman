@@ -5761,6 +5761,12 @@ const messages: TranslationMap = {
   'settings.profiles.editor.notFound': '프로필을 찾을 수 없습니다',
   'settings.profiles.editor.saving': '저장 중…',
   'settings.profiles.editor.idRequired': '프로필 식별자는 비워 둘 수 없습니다',
+  // Onboarding walkthrough review follow-up
+  'onboarding.welcome.logoAlt': 'OpenHuman 로고',
+  'walkthrough.progress.completed': '완료됨',
+  'walkthrough.progress.current': '현재',
+  'walkthrough.step.start': '설정 시작',
+  'walkthrough.desc.start': '안내를 확인하고 어시스턴트 연결을 시작하세요',
 };
 
 export default messages;

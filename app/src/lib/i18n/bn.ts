@@ -5821,6 +5821,12 @@ const messages: TranslationMap = {
   'settings.profiles.editor.notFound': 'প্রোফাইল পাওয়া যায়নি',
   'settings.profiles.editor.saving': 'সংরক্ষণ হচ্ছে…',
   'settings.profiles.editor.idRequired': 'প্রোফাইল আইডি খালি রাখা যাবে না',
+  // Onboarding walkthrough review follow-up
+  'onboarding.welcome.logoAlt': 'OpenHuman লোগো',
+  'walkthrough.progress.completed': 'সম্পন্ন',
+  'walkthrough.progress.current': 'বর্তমান',
+  'walkthrough.step.start': 'সেটআপ শুরু করুন',
+  'walkthrough.desc.start': 'ওয়াকথ্রু দেখুন এবং আপনার সহকারীকে সংযুক্ত করা শুরু করুন',
 };
 
 export default messages;

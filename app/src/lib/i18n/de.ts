@@ -5983,6 +5983,12 @@ const messages: TranslationMap = {
   'settings.profiles.editor.notFound': 'Profil nicht gefunden',
   'settings.profiles.editor.saving': 'Wird gespeichert…',
   'settings.profiles.editor.idRequired': 'Die Profil-Kennung darf nicht leer sein',
+  // Onboarding walkthrough review follow-up
+  'onboarding.welcome.logoAlt': 'OpenHuman-Logo',
+  'walkthrough.progress.completed': 'abgeschlossen',
+  'walkthrough.progress.current': 'aktuell',
+  'walkthrough.step.start': 'Einrichtung starten',
+  'walkthrough.desc.start': 'Prüfe die Einführung und beginne, deinen Assistenten zu verbinden',
 };
 
 export default messages;

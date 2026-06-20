@@ -5822,6 +5822,12 @@ const messages: TranslationMap = {
   'settings.profiles.editor.notFound': 'प्रोफ़ाइल नहीं मिली',
   'settings.profiles.editor.saving': 'सहेजा जा रहा है…',
   'settings.profiles.editor.idRequired': 'प्रोफ़ाइल आईडी खाली नहीं हो सकती',
+  // Onboarding walkthrough review follow-up
+  'onboarding.welcome.logoAlt': 'OpenHuman लोगो',
+  'walkthrough.progress.completed': 'पूर्ण',
+  'walkthrough.progress.current': 'वर्तमान',
+  'walkthrough.step.start': 'सेटअप शुरू करें',
+  'walkthrough.desc.start': 'वॉकथ्रू देखें और अपने सहायक को कनेक्ट करना शुरू करें',
 };
 
 export default messages;

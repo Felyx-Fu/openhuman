@@ -16,6 +16,9 @@ import {
 /** Ordered list of walkthrough phases in the narrative arc. */
 const WALKTHROUGH_PHASES: WalkthroughPhase[] = ['welcome', 'connect', 'automate', 'review', 'done'];
 
+/** Default action-card steps for the welcome phase. */
+const WELCOME_STEPS = [{ key: 'start', completed: false }];
+
 /** Default action-card steps for the connect phase. */
 const CONNECT_STEPS = [
   { key: 'gmail', completed: false },
@@ -34,7 +37,7 @@ const AUTOMATE_STEPS = [
 ];
 
 function createInitialWalkthrough(): WalkthroughState {
-  return { phase: 'welcome', steps: CONNECT_STEPS, completed: false, skipped: false };
+  return { phase: 'welcome', steps: WELCOME_STEPS, completed: false, skipped: false };
 }
 
 /**
@@ -58,8 +61,7 @@ const OnboardingLayout = () => {
     []
   );
 
-  const advanceWalkthrough = useCallback((stepKey?: string): WalkthroughState => {
-    let updated: WalkthroughState | undefined;
+  const advanceWalkthrough = useCallback((stepKey?: string): void => {
     setDraftState(prev => {
       const wt = prev.walkthrough ?? createInitialWalkthrough();
 
@@ -84,16 +86,18 @@ const OnboardingLayout = () => {
       // Load steps for the next phase.
       let nextSteps = steps;
       if (nextPhase !== wt.phase) {
-        if (nextPhase === 'connect') {
+        if (nextPhase === 'welcome') {
+          nextSteps = WELCOME_STEPS;
+        } else if (nextPhase === 'connect') {
           nextSteps = CONNECT_STEPS;
         } else if (nextPhase === 'automate') {
           nextSteps = AUTOMATE_STEPS;
-        } else if (nextPhase === 'review' || nextPhase === 'done') {
+        } else if (nextPhase === 'done') {
           nextSteps = [];
         }
       }
 
-      updated = {
+      const updated: WalkthroughState = {
         phase: nextPhase,
         steps: nextSteps,
         completed: nextPhase === 'done',
@@ -102,7 +106,6 @@ const OnboardingLayout = () => {
 
       return { ...prev, walkthrough: updated };
     });
-    return updated!;
   }, []);
 
   const skipWalkthrough = useCallback(() => {

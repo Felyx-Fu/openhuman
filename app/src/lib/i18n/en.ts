@@ -6091,6 +6091,12 @@ const en: TranslationMap = {
   'notch.speaking': 'Speaking…',
   'notch.transcribing': 'Transcribing…',
   'notch.executing': 'Executing…',
+  // Onboarding walkthrough review follow-up
+  'onboarding.welcome.logoAlt': 'OpenHuman logo',
+  'walkthrough.progress.completed': 'completed',
+  'walkthrough.progress.current': 'current',
+  'walkthrough.step.start': 'Start setup',
+  'walkthrough.desc.start': 'Review the walkthrough and start connecting your assistant',
 };
 
 export default en;

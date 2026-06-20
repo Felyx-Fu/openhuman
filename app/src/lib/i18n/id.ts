@@ -5841,6 +5841,12 @@ const messages: TranslationMap = {
   'settings.profiles.editor.notFound': 'Profil tidak ditemukan',
   'settings.profiles.editor.saving': 'Menyimpan…',
   'settings.profiles.editor.idRequired': 'ID profil tidak boleh kosong',
+  // Onboarding walkthrough review follow-up
+  'onboarding.welcome.logoAlt': 'Logo OpenHuman',
+  'walkthrough.progress.completed': 'selesai',
+  'walkthrough.progress.current': 'saat ini',
+  'walkthrough.step.start': 'Mulai penyiapan',
+  'walkthrough.desc.start': 'Tinjau panduan dan mulai hubungkan asisten Anda',
 };
 
 export default messages;

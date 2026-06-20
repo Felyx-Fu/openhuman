@@ -54,7 +54,7 @@ describe('WelcomeStep', () => {
 
   it('renders the logo image', () => {
     renderWithProviders(<WelcomeStep onNext={() => {}} />);
-    expect(screen.getByAltText('OpenHuman')).toBeInTheDocument();
+    expect(screen.getByAltText('OpenHuman logo')).toBeInTheDocument();
   });
 
   it('renders the hero subtitle', () => {

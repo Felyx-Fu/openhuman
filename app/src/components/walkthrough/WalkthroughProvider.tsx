@@ -32,7 +32,7 @@ export function useWalkthroughUI(): WalkthroughUIContextValue {
 
 interface WalkthroughProviderProps {
   state: WalkthroughState;
-  onAdvance: (stepKey?: string) => WalkthroughState;
+  onAdvance: (stepKey?: string) => void;
   onSkip: () => void;
   children: React.ReactNode;
 }
@@ -72,6 +72,7 @@ export const WalkthroughProvider = ({
       whatsapp: t('walkthrough.step.whatsapp', 'WhatsApp'),
       telegram: t('walkthrough.step.telegram', 'Telegram'),
       discord: t('walkthrough.step.discord', 'Discord'),
+      start: t('walkthrough.step.start', 'Start setup'),
       briefings: t('walkthrough.step.briefings', 'Daily Briefings'),
       notifications: t('walkthrough.step.notifications', 'Smart Notifications'),
       scheduling: t('walkthrough.step.scheduling', 'Auto Scheduling'),
@@ -87,6 +88,10 @@ export const WalkthroughProvider = ({
       whatsapp: t('walkthrough.desc.whatsapp', 'Chat with your assistant on the go'),
       telegram: t('walkthrough.desc.telegram', 'Secure messaging with your AI'),
       discord: t('walkthrough.desc.discord', 'Bring your assistant to your server'),
+      start: t(
+        'walkthrough.desc.start',
+        'Review the walkthrough and start connecting your assistant'
+      ),
       briefings: t('walkthrough.desc.briefings', 'Get a daily summary of what matters'),
       notifications: t('walkthrough.desc.notifications', 'Stay informed without the noise'),
       scheduling: t('walkthrough.desc.scheduling', 'Let AI handle your calendar'),

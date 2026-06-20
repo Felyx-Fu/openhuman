@@ -11,7 +11,8 @@ import { useWalkthroughUI } from './WalkthroughProvider';
  * When the phase is 'done', shows a celebration screen.
  */
 const WalkthroughPhasePanel = () => {
-  const { state, skip, phaseLabels, phaseIcons } = useWalkthroughUI();
+  const { state, skip, phaseLabels, phaseIcons, stepLabels, stepDescriptions } =
+    useWalkthroughUI();
   const { t } = useT();
 
   const { phase, steps } = state;
@@ -55,7 +56,27 @@ const WalkthroughPhasePanel = () => {
 
         {/* Summary cards — show what was completed */}
         <div className="space-y-2 mb-6">
-          {steps.length === 0 && (
+          {steps.length > 0 ? (
+            steps.map(step => (
+              <div
+                key={step.key}
+                className="flex items-start gap-3 rounded-xl border border-[#2F6EF4]/20 bg-[#2F6EF4]/5 p-3">
+                <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-[#2F6EF4] text-xs text-white">
+                  ✓
+                </span>
+                <div className="min-w-0">
+                  <h3 className="text-sm font-semibold text-stone-900 dark:text-neutral-100">
+                    {stepLabels[step.key] ?? step.key}
+                  </h3>
+                  {stepDescriptions[step.key] && (
+                    <p className="mt-0.5 text-xs leading-relaxed text-stone-500 dark:text-neutral-400">
+                      {stepDescriptions[step.key]}
+                    </p>
+                  )}
+                </div>
+              </div>
+            ))
+          ) : (
             <p className="text-sm text-stone-400 dark:text-neutral-500 text-center py-4">
               {state.skipped
                 ? t(
