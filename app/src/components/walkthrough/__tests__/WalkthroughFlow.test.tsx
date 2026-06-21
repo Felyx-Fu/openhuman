@@ -97,6 +97,26 @@ describe('Walkthrough flow', () => {
   it('renders empty review and done states', () => {
     const { rerender } = renderWithProviders(
       <WalkthroughProvider
+        state={{
+          phase: 'review',
+          steps: [
+            { key: 'gmail', completed: true },
+            { key: 'slack', completed: false },
+          ],
+          completed: false,
+          skipped: false,
+        }}
+        onAdvance={vi.fn()}
+        onSkip={vi.fn()}>
+        <WalkthroughPhasePanel />
+      </WalkthroughProvider>
+    );
+
+    expect(screen.getByText('Gmail')).toBeInTheDocument();
+    expect(screen.queryByText('Slack')).not.toBeInTheDocument();
+
+    rerender(
+      <WalkthroughProvider
         state={{ phase: 'review', steps: [], completed: false, skipped: true }}
         onAdvance={vi.fn()}
         onSkip={vi.fn()}>

@@ -5929,7 +5929,7 @@ const messages: TranslationMap = {
   'onboarding.welcome.logoAlt': 'Logotipo do OpenHuman',
   'walkthrough.progress.completed': 'concluído',
   'walkthrough.progress.current': 'atual',
-  'walkthrough.step.start': 'Começar configuração',
+  'walkthrough.step.start': 'Iniciar configuração',
   'walkthrough.desc.start': 'Revise o passo a passo e comece a conectar seu assistente',
 };
 

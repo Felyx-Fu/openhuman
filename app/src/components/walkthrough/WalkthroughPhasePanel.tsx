@@ -16,6 +16,7 @@ const WalkthroughPhasePanel = () => {
   const { t } = useT();
 
   const { phase, steps } = state;
+  const completedSteps = steps.filter(step => step.completed);
 
   // ── Done screen ──────────────────────────────────────────────────────
   if (phase === 'done') {
@@ -56,8 +57,8 @@ const WalkthroughPhasePanel = () => {
 
         {/* Summary cards — show what was completed */}
         <div className="space-y-2 mb-6">
-          {steps.length > 0 ? (
-            steps.map(step => (
+          {completedSteps.length > 0 ? (
+            completedSteps.map(step => (
               <div
                 key={step.key}
                 className="flex items-start gap-3 rounded-xl border border-[#2F6EF4]/20 bg-[#2F6EF4]/5 p-3">
