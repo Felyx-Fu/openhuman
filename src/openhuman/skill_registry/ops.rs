@@ -367,6 +367,12 @@ pub async fn install_from_catalog(
     );
 
     if entry.download_url.trim().is_empty() {
+        tracing::debug!(
+            entry_id = %entry.id,
+            source = %entry.source,
+            source_url = ?entry.source_url,
+            "[skill_registry] no direct download URL; returning actionable install error"
+        );
         let where_to_find = entry
             .source_url
             .as_deref()
@@ -703,7 +709,10 @@ mod tests {
                 "sourceUrl": url
             });
             let entry = parse_hermes_entry(&item).expect("entry");
-            assert_eq!(entry.download_url, "", "portal url must not be downloadable: {url}");
+            assert_eq!(
+                entry.download_url, "",
+                "portal url must not be downloadable: {url}"
+            );
             assert_eq!(entry.source_url.as_deref(), Some(url));
         }
     }
