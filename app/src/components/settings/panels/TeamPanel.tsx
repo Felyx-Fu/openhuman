@@ -16,6 +16,10 @@ import { useSettingsNavigation } from '../hooks/useSettingsNavigation';
 
 const log = debug('core-rpc:error');
 
+interface LegacyErrorPayload {
+  error?: unknown;
+}
+
 /**
  * Surface the real failure text to the user.
  *
@@ -28,7 +32,10 @@ const log = debug('core-rpc:error');
 function teamErrorMessage(err: unknown, fallback: string): string {
   if (err instanceof CoreRpcError) return err.message || fallback;
   if (err && typeof err === 'object' && 'error' in err) {
-    return String((err as { error: unknown }).error);
+    const legacyError = (err as LegacyErrorPayload).error;
+    if (typeof legacyError === 'string' && legacyError.trim()) {
+      return legacyError;
+    }
   }
   if (err instanceof Error && err.message) return err.message;
   return fallback;

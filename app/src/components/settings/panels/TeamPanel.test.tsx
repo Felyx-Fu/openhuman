@@ -201,6 +201,26 @@ describe('<TeamPanel />', () => {
     await waitFor(() => expect(screen.getByText('Team limit reached')).toBeInTheDocument());
   });
 
+  it('surfaces a legacy error payload when createTeam rejects', async () => {
+    teamApiMock.createTeam.mockRejectedValueOnce({ error: 'Name already taken' });
+    const Panel = await importPanel();
+    renderPanel(Panel);
+
+    fireEvent.change(screen.getByPlaceholderText('Team name'), { target: { value: 'New Team' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Create' }));
+    await waitFor(() => expect(screen.getByText('Name already taken')).toBeInTheDocument());
+  });
+
+  it('falls back when a legacy error payload is not a useful string', async () => {
+    teamApiMock.createTeam.mockRejectedValueOnce({ error: {} });
+    const Panel = await importPanel();
+    renderPanel(Panel);
+
+    fireEvent.change(screen.getByPlaceholderText('Team name'), { target: { value: 'New Team' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Create' }));
+    await waitFor(() => expect(screen.getByText('Failed to create team')).toBeInTheDocument());
+  });
+
   it('falls back to the localized banner when the error carries no message', async () => {
     teamApiMock.createTeam.mockRejectedValueOnce({});
     const Panel = await importPanel();
