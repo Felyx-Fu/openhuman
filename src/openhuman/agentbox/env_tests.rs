@@ -1,7 +1,4 @@
-use super::env::{
-    agentbox_env_test_lock, agentbox_mode_enabled, collect_gmi_config, GmiConfig,
-    AGENTBOX_MODE_ENV_VAR,
-};
+use super::env::{agentbox_mode_enabled, collect_gmi_config, GmiConfig, AGENTBOX_MODE_ENV_VAR};
 
 #[test]
 fn collect_returns_some_when_all_three_vars_present() {
@@ -40,7 +37,7 @@ fn collect_reports_each_missing_var() {
 // lock while toggling it and restore the prior value before releasing the lock.
 #[test]
 fn mode_enabled_only_when_flag_is_exactly_one() {
-    let _guard = agentbox_env_test_lock();
+    let _lock = super::test_support::test_env_lock();
     let prior = std::env::var(AGENTBOX_MODE_ENV_VAR).ok();
 
     std::env::set_var(AGENTBOX_MODE_ENV_VAR, "1");
