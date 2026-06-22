@@ -575,7 +575,7 @@ struct ResearchResponse {
     cost_usd: f64,
 }
 
-fn format_research_response(resp: ResearchResponse) -> String {
+fn format_research_response(resp: ResearchResponse) -> Result<String, String> {
     if let Some(id) = &resp.run_id {
         tracing::debug!(
             "[parallel_research] completed run_id={} status={:?} cost_usd={:.4}",
@@ -595,14 +595,21 @@ fn format_research_response(resp: ResearchResponse) -> String {
     if let Some(s) = &resp.status {
         out.push_str(&format!("Status: {}\n", s));
     }
-    if let Some(r) = resp.result {
-        out.push_str("\nResult:\n");
-        out.push_str(&serde_json::to_string_pretty(&r).unwrap_or_default());
-    } else {
-        out.push_str("\n(no result returned - run may still be in progress)");
-    }
+    let Some(r) = resp.result else {
+        let status = resp.status.as_deref().unwrap_or("unknown");
+        tracing::debug!(
+            "[parallel_research] incomplete blocking response status={} cost_usd={:.4}",
+            status,
+            resp.cost_usd
+        );
+        return Err(format!(
+            "Parallel research did not return a result before the inline wait completed (status: {status}). Try again with a higher timeout_seconds or a cheaper processor."
+        ));
+    };
+    out.push_str("\nResult:\n");
+    out.push_str(&serde_json::to_string_pretty(&r).unwrap_or_default());
     out.push_str(&format!("\n\nCost: ${:.4}", resp.cost_usd));
-    out
+    Ok(out)
 }
 
 fn research_payload(resp: &ResearchResponse, display: &str) -> serde_json::Value {
@@ -700,12 +707,15 @@ impl Tool for ParallelResearchTool {
             .await
         {
             Ok(resp) => {
-                let display = format_research_response(ResearchResponse {
+                let display = match format_research_response(ResearchResponse {
                     run_id: resp.run_id.clone(),
                     status: resp.status.clone(),
                     result: resp.result.clone(),
                     cost_usd: resp.cost_usd,
-                });
+                }) {
+                    Ok(display) => display,
+                    Err(message) => return Ok(ToolResult::error(message)),
+                };
                 Ok(ToolResult::success_with_markdown(
                     research_payload(&resp, &display),
                     display,
@@ -730,7 +740,7 @@ struct EnrichResponse {
     cost_usd: f64,
 }
 
-fn format_enrich_response(resp: EnrichResponse) -> String {
+fn format_enrich_response(resp: EnrichResponse) -> Result<String, String> {
     if let Some(id) = &resp.run_id {
         tracing::debug!(
             "[parallel_enrich] completed run_id={} status={:?} cost_usd={:.4}",
@@ -750,12 +760,21 @@ fn format_enrich_response(resp: EnrichResponse) -> String {
     if let Some(s) = &resp.status {
         out.push_str(&format!("Status: {}\n", s));
     }
-    if let Some(o) = resp.output {
-        out.push_str("\nOutput:\n");
-        out.push_str(&serde_json::to_string_pretty(&o).unwrap_or_default());
-    }
+    let Some(o) = resp.output else {
+        let status = resp.status.as_deref().unwrap_or("unknown");
+        tracing::debug!(
+            "[parallel_enrich] incomplete blocking response status={} cost_usd={:.4}",
+            status,
+            resp.cost_usd
+        );
+        return Err(format!(
+            "Parallel enrich did not return output before the inline wait completed (status: {status}). Try again with a higher timeout_seconds or a cheaper processor."
+        ));
+    };
+    out.push_str("\nOutput:\n");
+    out.push_str(&serde_json::to_string_pretty(&o).unwrap_or_default());
     out.push_str(&format!("\n\nCost: ${:.4}", resp.cost_usd));
-    out
+    Ok(out)
 }
 
 fn enrich_payload(resp: &EnrichResponse, display: &str) -> serde_json::Value {
@@ -850,12 +869,15 @@ impl Tool for ParallelEnrichTool {
             .await
         {
             Ok(resp) => {
-                let display = format_enrich_response(EnrichResponse {
+                let display = match format_enrich_response(EnrichResponse {
                     run_id: resp.run_id.clone(),
                     status: resp.status.clone(),
                     output: resp.output.clone(),
                     cost_usd: resp.cost_usd,
-                });
+                }) {
+                    Ok(display) => display,
+                    Err(message) => return Ok(ToolResult::error(message)),
+                };
                 Ok(ToolResult::success_with_markdown(
                     enrich_payload(&resp, &display),
                     display,

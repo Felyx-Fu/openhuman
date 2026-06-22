@@ -182,7 +182,8 @@ fn research_output_hides_internal_run_id() {
         status: Some("completed".into()),
         result: Some(json!({ "summary": "useful answer" })),
         cost_usd: 0.1234,
-    });
+    })
+    .unwrap();
 
     assert!(output.contains("Status: completed"));
     assert!(output.contains("useful answer"));
@@ -198,11 +199,42 @@ fn enrich_output_hides_internal_run_id() {
         status: Some("completed".into()),
         output: Some(json!({ "company": "OpenHuman" })),
         cost_usd: 0.5678,
-    });
+    })
+    .unwrap();
 
     assert!(output.contains("Status: completed"));
     assert!(output.contains("OpenHuman"));
     assert!(output.contains("Cost: $0.5678"));
     assert!(!output.contains("Run:"));
     assert!(!output.contains("run_internal_456"));
+}
+
+#[test]
+fn research_incomplete_response_returns_actionable_error_without_run_id() {
+    let err = format_research_response(ResearchResponse {
+        run_id: Some("run_internal_789".into()),
+        status: Some("running".into()),
+        result: None,
+        cost_usd: 0.1111,
+    })
+    .unwrap_err();
+
+    assert!(err.contains("did not return a result"));
+    assert!(err.contains("higher timeout_seconds"));
+    assert!(!err.contains("run_internal_789"));
+}
+
+#[test]
+fn enrich_incomplete_response_returns_actionable_error_without_run_id() {
+    let err = format_enrich_response(EnrichResponse {
+        run_id: Some("run_internal_987".into()),
+        status: Some("running".into()),
+        output: None,
+        cost_usd: 0.2222,
+    })
+    .unwrap_err();
+
+    assert!(err.contains("did not return output"));
+    assert!(err.contains("higher timeout_seconds"));
+    assert!(!err.contains("run_internal_987"));
 }

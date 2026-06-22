@@ -1148,9 +1148,14 @@ async fn all_tools_executes_apify_family_against_fake_backend() {
         .await
         .expect("apify_get_run_status execute");
     let status_display = status.output_for_llm(true);
+    let status_prose = status_display
+        .split("[apify_run_ref]")
+        .next()
+        .expect("status prose before ref");
     assert!(status_display.contains("Status: SUCCEEDED"));
-    assert!(!status_display.contains("run-apify-linkedin-profile-scraper"));
-    assert!(!status_display.contains("dataset-run-apify-linkedin-profile-scraper"));
+    assert!(!status_prose.contains("run-apify-linkedin-profile-scraper"));
+    assert!(!status_prose.contains("dataset-run-apify-linkedin-profile-scraper"));
+    assert!(status_display.contains("[apify_run_ref]"));
     let status_payload = only_json_content(&status);
     assert_eq!(
         status_payload["run_id"],

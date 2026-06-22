@@ -137,9 +137,15 @@ fn run_actor_async_output_shows_polling_instruction() {
     };
 
     let output = format_run_actor_response(&resp, false);
+    let prose = output
+        .split("[apify_run_ref]")
+        .next()
+        .expect("prose before ref");
 
     assert!(output.contains("This run is still in progress. Poll with apify_get_run_status."));
-    assert!(!output.contains("run-456"));
+    assert!(!prose.contains("run-456"));
+    assert!(output.contains("[apify_run_ref]"));
+    assert!(output.contains("\"run_id\":\"run-456\""));
 }
 
 #[test]
@@ -154,13 +160,20 @@ fn run_status_output_hides_internal_ids() {
     };
 
     let output = format_run_status_response(&resp);
+    let prose = output
+        .split("[apify_run_ref]")
+        .next()
+        .expect("prose before ref");
 
     assert!(output.contains("Actor ID: apify/web-scraper"));
     assert!(output.contains("Status: RUNNING"));
-    assert!(!output.contains("Run ID:"));
-    assert!(!output.contains("Dataset ID:"));
-    assert!(!output.contains("run-123"));
-    assert!(!output.contains("dataset-123"));
+    assert!(!prose.contains("Run ID:"));
+    assert!(!prose.contains("Dataset ID:"));
+    assert!(!prose.contains("run-123"));
+    assert!(!prose.contains("dataset-123"));
+    assert!(output.contains("[apify_run_ref]"));
+    assert!(output.contains("\"run_id\":\"run-123\""));
+    assert!(output.contains("\"dataset_id\":\"dataset-123\""));
 }
 
 #[test]

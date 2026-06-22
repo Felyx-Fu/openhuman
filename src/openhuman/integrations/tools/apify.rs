@@ -66,6 +66,12 @@ fn format_run_actor_response(resp: &ApifyRunResponse, sync: bool) -> String {
         }
     } else if !sync {
         lines.push("This run is still in progress. Poll with apify_get_run_status.".to_string());
+        lines
+            .push("Use the structured reference below for follow-up Apify tool calls.".to_string());
+        lines.push(format!(
+            "[apify_run_ref]\n{}\n[/apify_run_ref]",
+            format_apify_run_ref(resp)
+        ));
     }
 
     lines.push(format!("Cost: ${:.4}", resp.cost_usd));
@@ -73,12 +79,27 @@ fn format_run_actor_response(resp: &ApifyRunResponse, sync: bool) -> String {
 }
 
 fn format_run_status_response(resp: &ApifyRunResponse) -> String {
-    [
+    let mut lines = vec![
         format!("Actor ID: {}", resp.actor_id),
         format!("Status: {}", resp.status),
-        format!("Cost: ${:.4}", resp.cost_usd),
-    ]
-    .join("\n")
+    ];
+
+    lines.push("Use the structured reference below for follow-up Apify tool calls.".to_string());
+    lines.push(format!(
+        "[apify_run_ref]\n{}\n[/apify_run_ref]",
+        format_apify_run_ref(resp)
+    ));
+    lines.push(format!("Cost: ${:.4}", resp.cost_usd));
+    lines.join("\n")
+}
+
+fn format_apify_run_ref(resp: &ApifyRunResponse) -> String {
+    serde_json::to_string(&json!({
+        "run_id": resp.run_id,
+        "dataset_id": resp.dataset_id,
+        "status": resp.status,
+    }))
+    .unwrap_or_else(|_| "{}".to_string())
 }
 
 fn run_actor_payload(resp: &ApifyRunResponse, display: &str) -> serde_json::Value {

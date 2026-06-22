@@ -41,7 +41,7 @@ pub fn agentbox_status() -> RpcOutcome<AgentBoxStatus> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::openhuman::agentbox::env::{agentbox_env_test_lock, AGENTBOX_MODE_ENV_VAR};
+    use crate::openhuman::agentbox::env::AGENTBOX_MODE_ENV_VAR;
 
     // Env vars are process-global; hold the shared AgentBox env lock while
     // toggling them and restore every prior value before releasing the lock.
