@@ -52,6 +52,9 @@ pub fn update_profile(profile_id: &str, samples: &[i16]) -> Result<(), String> {
     let new_emb = extract_embedding(samples);
     let mut store = PROFILES.lock().map_err(|e| format!("lock: {e}"))?;
     let p = store.get_mut(profile_id).ok_or("profile not found")?;
+    if p.embedding.len() != new_emb.len() {
+        return Err("embedding dimension mismatch".into());
+    }
     let n = p.sample_count as f32;
     for (i, val) in p.embedding.iter_mut().enumerate() {
         *val = (*val * n + new_emb[i]) / (n + 1.0);
