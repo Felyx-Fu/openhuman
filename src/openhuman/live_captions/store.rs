@@ -13,6 +13,33 @@ const MAX_TRANSCRIPTS: usize = 100;
 static TRANSCRIPTS: std::sync::LazyLock<Mutex<HashMap<String, Transcript>>> =
     std::sync::LazyLock::new(|| Mutex::new(HashMap::new()));
 
+/// Enforce the transcript-store capacity limit before inserting a new entry.
+///
+/// Prefers evicting the oldest *completed* transcript so an in-progress
+/// recording is never silently discarded. If the store is still at capacity
+/// afterwards — e.g. every entry is still `Recording`/`Paused` — the insert is
+/// rejected so the cap is always honored (never exceeded), even when there is
+/// nothing completed to evict.
+fn enforce_capacity(store: &mut HashMap<String, Transcript>, max: usize) -> Result<(), String> {
+    if store.len() < max {
+        return Ok(());
+    }
+    // Evict the oldest completed transcript to make room, if any exists.
+    let oldest = store
+        .iter()
+        .filter(|(_, t)| t.state == TranscriptState::Completed)
+        .min_by_key(|(_, t)| t.updated_at)
+        .map(|(id, _)| id.clone());
+    if let Some(old_id) = oldest {
+        warn!(evicted = %old_id, "[live_captions] evicting oldest transcript (at capacity)");
+        store.remove(&old_id);
+    }
+    if store.len() >= max {
+        return Err("transcript store at capacity".into());
+    }
+    Ok(())
+}
+
 pub fn start_transcript(
     id: Option<String>,
     source: CaptionSource,
@@ -34,21 +61,7 @@ pub fn start_transcript(
     if store.contains_key(&tid) {
         return Err(format!("transcript already exists: {tid}"));
     }
-    // Evict oldest completed transcripts if at capacity.
-    if store.len() >= MAX_TRANSCRIPTS {
-        let oldest = store
-            .iter()
-            .filter(|(_, t)| t.state == TranscriptState::Completed)
-            .min_by_key(|(_, t)| t.updated_at)
-            .map(|(id, _)| id.clone());
-        if let Some(old_id) = oldest {
-            warn!(evicted = %old_id, "[live_captions] evicting oldest transcript (at capacity)");
-            store.remove(&old_id);
-        }
-    }
-    if store.len() >= MAX_TRANSCRIPTS {
-        return Err("transcript store at capacity".into());
-    }
+    enforce_capacity(&mut store, MAX_TRANSCRIPTS)?;
     store.insert(tid, t.clone());
     info!(transcript_id = %t.id, "[live_captions] transcript started");
     Ok(t)
@@ -196,6 +209,50 @@ fn uuid_v4() -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn mk(id: &str, state: TranscriptState, updated_at: u64) -> Transcript {
+        Transcript {
+            id: id.into(),
+            source: CaptionSource::Microphone,
+            state,
+            title: None,
+            segments: Vec::new(),
+            summary: None,
+            created_at: 0,
+            updated_at,
+        }
+    }
+
+    #[test]
+    fn enforce_capacity_allows_insert_below_cap() {
+        let mut store = HashMap::new();
+        store.insert("a".into(), mk("a", TranscriptState::Recording, 1));
+        // len (1) < max (2): room to insert, nothing evicted.
+        assert!(enforce_capacity(&mut store, 2).is_ok());
+        assert_eq!(store.len(), 1);
+    }
+
+    #[test]
+    fn enforce_capacity_evicts_oldest_completed() {
+        let mut store = HashMap::new();
+        store.insert("old".into(), mk("old", TranscriptState::Completed, 100));
+        store.insert("new".into(), mk("new", TranscriptState::Completed, 200));
+        assert!(enforce_capacity(&mut store, 2).is_ok());
+        assert!(!store.contains_key("old"), "oldest completed evicted");
+        assert!(store.contains_key("new"));
+    }
+
+    #[test]
+    fn enforce_capacity_honored_when_all_recording() {
+        // Regression: at capacity with no completed transcripts to evict, the
+        // cap must still be honored (insert rejected, store unchanged).
+        let mut store = HashMap::new();
+        store.insert("a".into(), mk("a", TranscriptState::Recording, 1));
+        store.insert("b".into(), mk("b", TranscriptState::Paused, 2));
+        let r = enforce_capacity(&mut store, 2);
+        assert!(r.is_err(), "expected capacity error when nothing evictable");
+        assert_eq!(store.len(), 2, "no in-progress transcript discarded");
+    }
 
     #[test]
     fn start_creates_transcript() {

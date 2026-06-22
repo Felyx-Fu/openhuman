@@ -139,6 +139,23 @@ mod tests {
     }
 
     #[test]
+    fn from_codes_normalizes_case_and_whitespace() {
+        // Mixed case and surrounding whitespace must still resolve to the pair.
+        assert_eq!(
+            TranslationPair::from_codes("EN", "es"),
+            Some(TranslationPair::EnEs)
+        );
+        assert_eq!(
+            TranslationPair::from_codes(" en ", "ES"),
+            Some(TranslationPair::EnEs)
+        );
+        assert_eq!(
+            TranslationPair::from_codes("Zh", " EN "),
+            Some(TranslationPair::ZhEn)
+        );
+    }
+
+    #[test]
     fn build_prompt_contains_languages() {
         let prompt = build_translation_prompt("Hello world", TranslationPair::EnEs);
         assert!(prompt.contains("English"));

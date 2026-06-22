@@ -410,4 +410,50 @@ mod tests {
         // Summary comes from either LLM or extractive fallback.
         assert!(r["summary"].as_str().unwrap().len() > 5);
     }
+
+    #[tokio::test]
+    async fn export_unknown_transcript_returns_error_json() {
+        // Regression: handler must surface store errors as `{ok:false}` JSON
+        // (consistent with sibling handlers), not propagate via `?`.
+        let mut p = Map::new();
+        p.insert(
+            "transcript_id".into(),
+            Value::String("rpc-lc-missing-export".into()),
+        );
+        p.insert("format".into(), Value::String("markdown".into()));
+        let r = handle_export_transcript(p).await.unwrap();
+        assert_eq!(r["ok"], false);
+        assert!(r["error"].as_str().unwrap().contains("not found"));
+    }
+
+    #[tokio::test]
+    async fn export_markdown_ok() {
+        let mut p = Map::new();
+        p.insert(
+            "transcript_id".into(),
+            Value::String("rpc-lc-export".into()),
+        );
+        handle_start_transcript(p).await.unwrap();
+
+        let mut p = Map::new();
+        p.insert(
+            "transcript_id".into(),
+            Value::String("rpc-lc-export".into()),
+        );
+        p.insert("text".into(), Value::String("Hello world".into()));
+        p.insert("start_ms".into(), json!(0));
+        p.insert("end_ms".into(), json!(1000));
+        handle_append_segment(p).await.unwrap();
+
+        let mut p = Map::new();
+        p.insert(
+            "transcript_id".into(),
+            Value::String("rpc-lc-export".into()),
+        );
+        p.insert("format".into(), Value::String("markdown".into()));
+        let r = handle_export_transcript(p).await.unwrap();
+        assert_eq!(r["ok"], true);
+        assert_eq!(r["format"], "markdown");
+        assert!(r["content"].as_str().unwrap().contains("Hello world"));
+    }
 }
