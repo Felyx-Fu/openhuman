@@ -35,7 +35,7 @@ pub fn get_context(session_id: &str) -> Vec<String> {
         // First pass: remove stale (timed out).
         let stale: Vec<String> = store
             .iter()
-            .filter(|(_, ctx)| now - ctx.last_active > CONTEXT_TIMEOUT_SECS)
+            .filter(|(_, ctx)| now.saturating_sub(ctx.last_active) > CONTEXT_TIMEOUT_SECS)
             .map(|(k, _)| k.clone())
             .collect();
         for k in &stale {
@@ -55,7 +55,7 @@ pub fn get_context(session_id: &str) -> Vec<String> {
         }
     }
     if let Some(ctx) = store.get_mut(session_id) {
-        if now - ctx.last_active > CONTEXT_TIMEOUT_SECS {
+        if now.saturating_sub(ctx.last_active) > CONTEXT_TIMEOUT_SECS {
             // Context expired, reset.
             ctx.intents.clear();
         }
@@ -80,7 +80,7 @@ pub fn record_context(session_id: &str, intent_id: &str) {
         // Evict stale first, then oldest.
         let stale: Vec<String> = store
             .iter()
-            .filter(|(_, ctx)| now - ctx.last_active > CONTEXT_TIMEOUT_SECS)
+            .filter(|(_, ctx)| now.saturating_sub(ctx.last_active) > CONTEXT_TIMEOUT_SECS)
             .map(|(k, _)| k.clone())
             .collect();
         for k in &stale {
