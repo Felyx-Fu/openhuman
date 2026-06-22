@@ -58,6 +58,17 @@ fn is_blocked_ip(ip: IpAddr) -> bool {
     }
 }
 
+/// Strip the surrounding brackets from a bracketed IPv6 host literal (`[::1]` -> `::1`).
+///
+/// `reqwest::Url::host_str` returns IPv6 hosts with brackets, but both
+/// `IpAddr::parse` and `tokio::net::lookup_host` expect the bare address.
+/// Non-bracketed hosts (domains, IPv4) are returned unchanged.
+fn unbracket_host(host: &str) -> &str {
+    host.strip_prefix('[')
+        .and_then(|h| h.strip_suffix(']'))
+        .unwrap_or(host)
+}
+
 /// Validate that a webhook URL does not target private/loopback addresses (SSRF protection).
 ///
 /// This screens the literal host. Hostnames that resolve to private addresses are
@@ -76,7 +87,9 @@ fn validate_webhook_url(url: &str) -> Result<(), String> {
     if host.eq_ignore_ascii_case("localhost") {
         return Err("loopback addresses are not allowed".into());
     }
-    if let Ok(ip) = host.parse::<IpAddr>() {
+    // `host_str()` returns IPv6 literals wrapped in brackets (e.g. `[::1]`),
+    // which do not parse as `IpAddr` — strip them before checking.
+    if let Ok(ip) = unbracket_host(host).parse::<IpAddr>() {
         if is_blocked_ip(ip) {
             return Err("private/loopback/link-local addresses are not allowed".into());
         }
@@ -90,10 +103,12 @@ fn validate_webhook_url(url: &str) -> Result<(), String> {
 /// address (DNS rebinding, changed records) cannot reach private services.
 async fn resolve_and_check(url: &str) -> Result<(), String> {
     let parsed = reqwest::Url::parse(url).map_err(|e| format!("invalid URL: {e}"))?;
-    let host = parsed
-        .host_str()
-        .ok_or_else(|| "URL has no host".to_string())?
-        .to_string();
+    let host = unbracket_host(
+        parsed
+            .host_str()
+            .ok_or_else(|| "URL has no host".to_string())?,
+    )
+    .to_string();
     // Literal IPs are already covered by validate_webhook_url, but lookup_host
     // handles them uniformly and we re-check regardless.
     let port = parsed.port_or_known_default().unwrap_or(443);
