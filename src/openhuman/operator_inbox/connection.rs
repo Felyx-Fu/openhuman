@@ -199,10 +199,21 @@ pub async fn send_reply(
 
     let creds = Credentials::new(config.username.clone(), config.password.clone());
 
-    let mailer = AsyncSmtpTransport::<Tokio1Executor>::relay(&config.host)
+    // Honor the configured port and TLS mode: STARTTLS for submission ports
+    // (e.g. 587), implicit TLS for 465, plaintext only when TLS is disabled.
+    // `relay()` alone forces implicit TLS on 465 and silently ignores
+    // `config.port`, which breaks the common 587/STARTTLS default.
+    let builder = if config.use_tls {
+        if config.port == 465 {
+            AsyncSmtpTransport::<Tokio1Executor>::relay(&config.host)
+        } else {
+            AsyncSmtpTransport::<Tokio1Executor>::starttls_relay(&config.host)
+        }
         .map_err(|e| format!("{LOG_PREFIX} SMTP relay: {e}"))?
-        .credentials(creds)
-        .build();
+    } else {
+        AsyncSmtpTransport::<Tokio1Executor>::builder_dangerous(&config.host)
+    };
+    let mailer = builder.port(config.port).credentials(creds).build();
 
     mailer
         .send(email)
