@@ -41,11 +41,12 @@ pub fn agentbox_status() -> RpcOutcome<AgentBoxStatus> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::openhuman::agentbox::env::AGENTBOX_MODE_ENV_VAR;
+    use crate::openhuman::agentbox::env::{agentbox_env_test_lock, AGENTBOX_MODE_ENV_VAR};
 
-    // Env vars are process-global; these toggles are restored on exit and no
-    // other test mutates the same keys concurrently (see disabled_mode_tests).
+    // Env vars are process-global; hold the shared AgentBox env lock while
+    // toggling them and restore every prior value before releasing the lock.
     fn with_clean_env<F: FnOnce()>(f: F) {
+        let _guard = agentbox_env_test_lock();
         let prior_mode = std::env::var(AGENTBOX_MODE_ENV_VAR).ok();
         let prior_url = std::env::var("GMI_MAAS_BASE_URL").ok();
         let prior_key = std::env::var("GMI_MAAS_API_KEY").ok();
@@ -56,7 +57,7 @@ mod tests {
         std::env::remove_var("GMI_MAAS_API_KEY");
         std::env::remove_var("GMI_MODELS");
 
-        f();
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(f));
 
         let restore = |k: &str, v: Option<String>| match v {
             Some(v) => std::env::set_var(k, v),
@@ -66,6 +67,10 @@ mod tests {
         restore("GMI_MAAS_BASE_URL", prior_url);
         restore("GMI_MAAS_API_KEY", prior_key);
         restore("GMI_MODELS", prior_models);
+
+        if let Err(panic) = result {
+            std::panic::resume_unwind(panic);
+        }
     }
 
     #[test]

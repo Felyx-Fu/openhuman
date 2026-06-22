@@ -575,6 +575,46 @@ struct ResearchResponse {
     cost_usd: f64,
 }
 
+fn format_research_response(resp: ResearchResponse) -> String {
+    if let Some(id) = &resp.run_id {
+        tracing::debug!(
+            "[parallel_research] completed run_id={} status={:?} cost_usd={:.4}",
+            id,
+            resp.status,
+            resp.cost_usd
+        );
+    } else {
+        tracing::debug!(
+            "[parallel_research] completed without run_id status={:?} cost_usd={:.4}",
+            resp.status,
+            resp.cost_usd
+        );
+    }
+
+    let mut out = String::new();
+    if let Some(s) = &resp.status {
+        out.push_str(&format!("Status: {}\n", s));
+    }
+    if let Some(r) = resp.result {
+        out.push_str("\nResult:\n");
+        out.push_str(&serde_json::to_string_pretty(&r).unwrap_or_default());
+    } else {
+        out.push_str("\n(no result returned - run may still be in progress)");
+    }
+    out.push_str(&format!("\n\nCost: ${:.4}", resp.cost_usd));
+    out
+}
+
+fn research_payload(resp: &ResearchResponse, display: &str) -> serde_json::Value {
+    json!({
+        "display": display,
+        "run_id": resp.run_id,
+        "status": resp.status,
+        "result": resp.result,
+        "cost_usd": resp.cost_usd,
+    })
+}
+
 /// Deep research via Parallel's Task API — multi-step web investigation
 /// with structured or freeform output.
 pub struct ParallelResearchTool {
@@ -660,21 +700,16 @@ impl Tool for ParallelResearchTool {
             .await
         {
             Ok(resp) => {
-                let mut out = String::new();
-                if let Some(id) = &resp.run_id {
-                    out.push_str(&format!("Run: {}\n", id));
-                }
-                if let Some(s) = &resp.status {
-                    out.push_str(&format!("Status: {}\n", s));
-                }
-                if let Some(r) = resp.result {
-                    out.push_str("\nResult:\n");
-                    out.push_str(&serde_json::to_string_pretty(&r).unwrap_or_default());
-                } else {
-                    out.push_str("\n(no result returned — run may still be in progress)");
-                }
-                out.push_str(&format!("\n\nCost: ${:.4}", resp.cost_usd));
-                Ok(ToolResult::success(out))
+                let display = format_research_response(ResearchResponse {
+                    run_id: resp.run_id.clone(),
+                    status: resp.status.clone(),
+                    result: resp.result.clone(),
+                    cost_usd: resp.cost_usd,
+                });
+                Ok(ToolResult::success_with_markdown(
+                    research_payload(&resp, &display),
+                    display,
+                ))
             }
             Err(e) => Ok(ToolResult::error(format!("Parallel research failed: {e}"))),
         }
@@ -693,6 +728,44 @@ struct EnrichResponse {
     output: Option<serde_json::Value>,
     #[serde(rename = "costUsd", default)]
     cost_usd: f64,
+}
+
+fn format_enrich_response(resp: EnrichResponse) -> String {
+    if let Some(id) = &resp.run_id {
+        tracing::debug!(
+            "[parallel_enrich] completed run_id={} status={:?} cost_usd={:.4}",
+            id,
+            resp.status,
+            resp.cost_usd
+        );
+    } else {
+        tracing::debug!(
+            "[parallel_enrich] completed without run_id status={:?} cost_usd={:.4}",
+            resp.status,
+            resp.cost_usd
+        );
+    }
+
+    let mut out = String::new();
+    if let Some(s) = &resp.status {
+        out.push_str(&format!("Status: {}\n", s));
+    }
+    if let Some(o) = resp.output {
+        out.push_str("\nOutput:\n");
+        out.push_str(&serde_json::to_string_pretty(&o).unwrap_or_default());
+    }
+    out.push_str(&format!("\n\nCost: ${:.4}", resp.cost_usd));
+    out
+}
+
+fn enrich_payload(resp: &EnrichResponse, display: &str) -> serde_json::Value {
+    json!({
+        "display": display,
+        "run_id": resp.run_id,
+        "status": resp.status,
+        "output": resp.output,
+        "cost_usd": resp.cost_usd,
+    })
 }
 
 /// Enrich an entity with structured web data — synchronous Task API run
@@ -777,19 +850,16 @@ impl Tool for ParallelEnrichTool {
             .await
         {
             Ok(resp) => {
-                let mut out = String::new();
-                if let Some(id) = &resp.run_id {
-                    out.push_str(&format!("Run: {}\n", id));
-                }
-                if let Some(s) = &resp.status {
-                    out.push_str(&format!("Status: {}\n", s));
-                }
-                if let Some(o) = resp.output {
-                    out.push_str("\nOutput:\n");
-                    out.push_str(&serde_json::to_string_pretty(&o).unwrap_or_default());
-                }
-                out.push_str(&format!("\n\nCost: ${:.4}", resp.cost_usd));
-                Ok(ToolResult::success(out))
+                let display = format_enrich_response(EnrichResponse {
+                    run_id: resp.run_id.clone(),
+                    status: resp.status.clone(),
+                    output: resp.output.clone(),
+                    cost_usd: resp.cost_usd,
+                });
+                Ok(ToolResult::success_with_markdown(
+                    enrich_payload(&resp, &display),
+                    display,
+                ))
             }
             Err(e) => Ok(ToolResult::error(format!("Parallel enrich failed: {e}"))),
         }

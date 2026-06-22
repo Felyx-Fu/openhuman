@@ -174,3 +174,35 @@ fn extract_response_with_full_content() {
         Some("This is the full article content.")
     );
 }
+
+#[test]
+fn research_output_hides_internal_run_id() {
+    let output = format_research_response(ResearchResponse {
+        run_id: Some("run_internal_123".into()),
+        status: Some("completed".into()),
+        result: Some(json!({ "summary": "useful answer" })),
+        cost_usd: 0.1234,
+    });
+
+    assert!(output.contains("Status: completed"));
+    assert!(output.contains("useful answer"));
+    assert!(output.contains("Cost: $0.1234"));
+    assert!(!output.contains("Run:"));
+    assert!(!output.contains("run_internal_123"));
+}
+
+#[test]
+fn enrich_output_hides_internal_run_id() {
+    let output = format_enrich_response(EnrichResponse {
+        run_id: Some("run_internal_456".into()),
+        status: Some("completed".into()),
+        output: Some(json!({ "company": "OpenHuman" })),
+        cost_usd: 0.5678,
+    });
+
+    assert!(output.contains("Status: completed"));
+    assert!(output.contains("OpenHuman"));
+    assert!(output.contains("Cost: $0.5678"));
+    assert!(!output.contains("Run:"));
+    assert!(!output.contains("run_internal_456"));
+}

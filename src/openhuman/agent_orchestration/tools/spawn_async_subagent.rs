@@ -386,15 +386,36 @@ impl Tool for SpawnAsyncSubagentTool {
             "mode": "async",
             "worker_thread_id": worker_thread_id,
         });
-        Ok(ToolResult::success(format!(
-            "Accepted background sub-agent `{}` (task_id `{}`). Do not block on it before answering the user. \
-             You may redirect it mid-run with `steer_subagent {{ task_id, message }}` and collect its result \
-             with `wait_subagent {{ task_id }}`.\n\n[async_subagent_ref]\n{}\n[/async_subagent_ref]",
+        let payload_json = match serde_json::to_string(&payload) {
+            Ok(serialized) => {
+                log::debug!(
+                    "[spawn_async_subagent] serialized async reference payload bytes={}",
+                    serialized.len()
+                );
+                serialized
+            }
+            Err(error) => {
+                log::debug!(
+                    "[spawn_async_subagent] failed to serialize async reference payload: {}",
+                    error
+                );
+                "{}".to_string()
+            }
+        };
+        log::debug!("[spawn_async_subagent] formatting accepted response");
+        Ok(ToolResult::success(format_async_subagent_accepted(
             payload["agent_id"].as_str().unwrap_or("subagent"),
-            task_id,
-            serde_json::to_string(&payload).unwrap_or_else(|_| "{}".to_string())
+            &payload_json,
         )))
     }
+}
+
+fn format_async_subagent_accepted(agent_id: &str, payload_json: &str) -> String {
+    format!(
+        "Accepted background sub-agent `{agent_id}`. Do not block on it before answering the user. \
+         You may redirect it mid-run with `steer_subagent` and collect its result with `wait_subagent` \
+         using the structured reference below.\n\n[async_subagent_ref]\n{payload_json}\n[/async_subagent_ref]"
+    )
 }
 
 fn add_background_contract(prompt: &str) -> String {
@@ -437,6 +458,21 @@ mod tests {
         assert!(wrapped.contains("[Background Contract]"));
         assert!(wrapped.contains("Do not call ask_user_clarification"));
         assert!(wrapped.contains("[Task]\narchive this fact"));
+    }
+
+    #[test]
+    fn accepted_message_hides_task_id_from_prose() {
+        let payload = r#"{"task_id":"sub-internal-123","agent_id":"archivist","mode":"async"}"#;
+        let message = format_async_subagent_accepted("archivist", payload);
+        let prose = message
+            .split("[async_subagent_ref]")
+            .next()
+            .expect("prose before structured reference");
+
+        assert!(prose.contains("Accepted background sub-agent `archivist`"));
+        assert!(!prose.contains("sub-internal-123"));
+        assert!(message.contains("[async_subagent_ref]"));
+        assert!(message.contains("sub-internal-123"));
     }
 
     #[tokio::test]

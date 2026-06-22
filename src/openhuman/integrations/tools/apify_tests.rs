@@ -105,6 +105,65 @@ fn run_response_deserializes() {
 }
 
 #[test]
+fn run_actor_output_hides_internal_ids() {
+    let resp = ApifyRunResponse {
+        run_id: "run-123".to_string(),
+        actor_id: "apify/web-scraper".to_string(),
+        status: "SUCCEEDED".to_string(),
+        dataset_id: Some("dataset-123".to_string()),
+        items: Some(vec![json!({"url": "https://example.com"})]),
+        cost_usd: 0.3,
+    };
+
+    let output = format_run_actor_response(&resp, true);
+
+    assert!(output.contains("Apify run started for actor: apify/web-scraper"));
+    assert!(output.contains("Status: SUCCEEDED"));
+    assert!(!output.contains("Run ID:"));
+    assert!(!output.contains("Dataset ID:"));
+    assert!(!output.contains("run-123"));
+    assert!(!output.contains("dataset-123"));
+}
+
+#[test]
+fn run_actor_async_output_shows_polling_instruction() {
+    let resp = ApifyRunResponse {
+        run_id: "run-456".to_string(),
+        actor_id: "apify/crawler".to_string(),
+        status: "RUNNING".to_string(),
+        dataset_id: None,
+        items: None,
+        cost_usd: 0.05,
+    };
+
+    let output = format_run_actor_response(&resp, false);
+
+    assert!(output.contains("This run is still in progress. Poll with apify_get_run_status."));
+    assert!(!output.contains("run-456"));
+}
+
+#[test]
+fn run_status_output_hides_internal_ids() {
+    let resp = ApifyRunResponse {
+        run_id: "run-123".to_string(),
+        actor_id: "apify/web-scraper".to_string(),
+        status: "RUNNING".to_string(),
+        dataset_id: Some("dataset-123".to_string()),
+        items: None,
+        cost_usd: 0.1,
+    };
+
+    let output = format_run_status_response(&resp);
+
+    assert!(output.contains("Actor ID: apify/web-scraper"));
+    assert!(output.contains("Status: RUNNING"));
+    assert!(!output.contains("Run ID:"));
+    assert!(!output.contains("Dataset ID:"));
+    assert!(!output.contains("run-123"));
+    assert!(!output.contains("dataset-123"));
+}
+
+#[test]
 fn results_response_deserializes() {
     let json = r#"{"items":[{"foo":"bar"}],"total":42}"#;
     let resp: ApifyGetRunResultsResponse = serde_json::from_str(json).unwrap();
