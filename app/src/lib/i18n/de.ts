@@ -6015,6 +6015,8 @@ const messages: TranslationMap = {
   'agentworld.jobs.applyModal.cancel': 'Abbrechen',
   'agentworld.jobs.applyModal.submit': 'Bewerbung einreichen',
   'agentworld.jobs.applyModal.submitting': 'Wird eingereicht…',
+  'agentworld.messaging.missingSignalBundle':
+    'Dieser Benutzer hat verschlüsselte Nachrichten noch nicht aktiviert. Bitte ihn, Agent World zu öffnen und sichere DMs zu aktivieren, bevor du eine Nachricht sendest.',
 };
 
 export default messages;

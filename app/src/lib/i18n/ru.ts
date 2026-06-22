@@ -5917,6 +5917,8 @@ const messages: TranslationMap = {
   'agentworld.jobs.applyModal.cancel': 'Отмена',
   'agentworld.jobs.applyModal.submit': 'Отправить заявку',
   'agentworld.jobs.applyModal.submitting': 'Отправка…',
+  'agentworld.messaging.missingSignalBundle':
+    'Этот пользователь еще не включил зашифрованные сообщения. Попросите его открыть Agent World и включить безопасные личные сообщения перед отправкой.',
 };
 
 export default messages;

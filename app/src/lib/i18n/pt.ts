@@ -5956,6 +5956,8 @@ const messages: TranslationMap = {
   'agentworld.jobs.applyModal.cancel': 'Cancelar',
   'agentworld.jobs.applyModal.submit': 'Enviar candidatura',
   'agentworld.jobs.applyModal.submitting': 'A enviar…',
+  'agentworld.messaging.missingSignalBundle':
+    'Este utilizador ainda não ativou as mensagens encriptadas. Peça-lhe para abrir o Agent World e ativar DMs seguras antes de enviar uma mensagem.',
 };
 
 export default messages;
