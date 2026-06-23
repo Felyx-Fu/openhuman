@@ -64,8 +64,13 @@ fn format_run_actor_response(resp: &ApifyRunResponse, sync: bool) -> String {
             lines.push("Sample results:".to_string());
             lines.push(summarize_json_array(items, 3));
         }
-    } else if !sync {
-        lines.push("This run is still in progress. Poll with apify_get_run_status.".to_string());
+    } else {
+        let follow_up = if sync {
+            "No inline result items were returned. Poll with apify_get_run_status or fetch results with apify_get_run_results."
+        } else {
+            "This run is still in progress. Poll with apify_get_run_status."
+        };
+        lines.push(follow_up.to_string());
         lines
             .push("Use the structured reference below for follow-up Apify tool calls.".to_string());
         lines.push(format!(

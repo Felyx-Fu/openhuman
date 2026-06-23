@@ -1295,10 +1295,7 @@ async fn all_tools_executes_parallel_and_web_search_family_against_fake_backend(
     assert!(research_display.contains("\"company\": \"Tiny Humans\""));
     assert!(!research_display.contains("research-core"));
     let research_payload = only_json_content(&research);
-    assert_eq!(
-        research_payload["run_id"],
-        serde_json::json!("research-core")
-    );
+    assert!(research_payload.get("run_id").is_none());
 
     let enrich = find_tool(&tools, "parallel_enrich")
         .execute(serde_json::json!({
@@ -1313,7 +1310,7 @@ async fn all_tools_executes_parallel_and_web_search_family_against_fake_backend(
     assert!(enrich_display.contains("\"inputEcho\": \"Tiny Humans\""));
     assert!(!enrich_display.contains("enrich-1"));
     let enrich_payload = only_json_content(&enrich);
-    assert_eq!(enrich_payload["run_id"], serde_json::json!("enrich-1"));
+    assert!(enrich_payload.get("run_id").is_none());
 
     let dataset = find_tool(&tools, "parallel_dataset")
         .execute(serde_json::json!({

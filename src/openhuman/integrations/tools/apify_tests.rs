@@ -149,6 +149,30 @@ fn run_actor_async_output_shows_polling_instruction() {
 }
 
 #[test]
+fn run_actor_sync_without_items_shows_follow_up_ref() {
+    let resp = ApifyRunResponse {
+        run_id: "run-789".to_string(),
+        actor_id: "apify/crawler".to_string(),
+        status: "RUNNING".to_string(),
+        dataset_id: Some("dataset-789".to_string()),
+        items: None,
+        cost_usd: 0.05,
+    };
+
+    let output = format_run_actor_response(&resp, true);
+    let prose = output
+        .split("[apify_run_ref]")
+        .next()
+        .expect("prose before ref");
+
+    assert!(output.contains("Poll with apify_get_run_status"));
+    assert!(!prose.contains("run-789"));
+    assert!(output.contains("[apify_run_ref]"));
+    assert!(output.contains("\"run_id\":\"run-789\""));
+    assert!(output.contains("\"dataset_id\":\"dataset-789\""));
+}
+
+#[test]
 fn run_status_output_hides_internal_ids() {
     let resp = ApifyRunResponse {
         run_id: "run-123".to_string(),

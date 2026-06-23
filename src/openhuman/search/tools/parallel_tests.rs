@@ -177,36 +177,52 @@ fn extract_response_with_full_content() {
 
 #[test]
 fn research_output_hides_internal_run_id() {
-    let output = format_research_response(ResearchResponse {
+    let resp = ResearchResponse {
         run_id: Some("run_internal_123".into()),
         status: Some("completed".into()),
         result: Some(json!({ "summary": "useful answer" })),
         cost_usd: 0.1234,
+    };
+    let output = format_research_response(ResearchResponse {
+        run_id: resp.run_id.clone(),
+        status: resp.status.clone(),
+        result: resp.result.clone(),
+        cost_usd: resp.cost_usd,
     })
     .unwrap();
+    let payload = research_payload(&resp, &output);
 
     assert!(output.contains("Status: completed"));
     assert!(output.contains("useful answer"));
     assert!(output.contains("Cost: $0.1234"));
     assert!(!output.contains("Run:"));
     assert!(!output.contains("run_internal_123"));
+    assert!(payload.get("run_id").is_none());
 }
 
 #[test]
 fn enrich_output_hides_internal_run_id() {
-    let output = format_enrich_response(EnrichResponse {
+    let resp = EnrichResponse {
         run_id: Some("run_internal_456".into()),
         status: Some("completed".into()),
         output: Some(json!({ "company": "OpenHuman" })),
         cost_usd: 0.5678,
+    };
+    let output = format_enrich_response(EnrichResponse {
+        run_id: resp.run_id.clone(),
+        status: resp.status.clone(),
+        output: resp.output.clone(),
+        cost_usd: resp.cost_usd,
     })
     .unwrap();
+    let payload = enrich_payload(&resp, &output);
 
     assert!(output.contains("Status: completed"));
     assert!(output.contains("OpenHuman"));
     assert!(output.contains("Cost: $0.5678"));
     assert!(!output.contains("Run:"));
     assert!(!output.contains("run_internal_456"));
+    assert!(payload.get("run_id").is_none());
 }
 
 #[test]

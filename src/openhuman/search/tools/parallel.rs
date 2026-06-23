@@ -615,7 +615,6 @@ fn format_research_response(resp: ResearchResponse) -> Result<String, String> {
 fn research_payload(resp: &ResearchResponse, display: &str) -> serde_json::Value {
     json!({
         "display": display,
-        "run_id": resp.run_id,
         "status": resp.status,
         "result": resp.result,
         "cost_usd": resp.cost_usd,
@@ -780,7 +779,6 @@ fn format_enrich_response(resp: EnrichResponse) -> Result<String, String> {
 fn enrich_payload(resp: &EnrichResponse, display: &str) -> serde_json::Value {
     json!({
         "display": display,
-        "run_id": resp.run_id,
         "status": resp.status,
         "output": resp.output,
         "cost_usd": resp.cost_usd,
