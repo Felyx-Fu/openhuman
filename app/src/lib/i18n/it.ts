@@ -4503,6 +4503,10 @@ const messages: TranslationMap = {
     "Richiedere l'approvazione del piano di lavoro",
   'settings.agentAccess.requireTaskPlanApproval.desc':
     "Pausa prima che un agente assegnato esegua un brief del compito scritto dall'agente.",
+  'settings.agentAccess.tinyplaceAutopilot.title': 'Agente tiny.place autonomo',
+  'settings.agentAccess.tinyplaceAutopilot.desc':
+    'Lascia che OpenHuman agisca su tiny.place da solo: in modo pianificato cerca lavoro utile — prima le taglie aperte —, fa ciò che si adatta alle sue competenze e agisce dalla tua identità. Funziona senza supervisione e può spendere, quindi tienilo su devnet durante i test. Disattivato per impostazione predefinita.',
+  'settings.agentAccess.tinyplaceAutopilot.label': 'Esegui automaticamente',
   'settings.agentAccess.timeout.label': "Timeout dell'azione",
   'settings.agentAccess.timeout.desc':
     'Per quanto tempo un singolo strumento o azione può essere eseguito prima di essere annullato. Aumenta questo valore se un modello locale di grandi dimensioni viene interrotto prima di completare la risposta.',

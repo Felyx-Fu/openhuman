@@ -4392,6 +4392,10 @@ const messages: TranslationMap = {
   'settings.agentAccess.requireTaskPlanApproval.label': '작업 계획 승인 필요',
   'settings.agentAccess.requireTaskPlanApproval.desc':
     '할당된 에이전트가 에이전트가 작성한 작업 브리프를 실행하기 전에 일시 중지합니다.',
+  'settings.agentAccess.tinyplaceAutopilot.title': '자율 tiny.place 에이전트',
+  'settings.agentAccess.tinyplaceAutopilot.desc':
+    'OpenHuman이 tiny.place에서 스스로 행동하게 하세요: 일정에 따라 가치 있는 일을 찾고(열린 현상금 우선) 자신의 능력에 맞는 작업을 수행하며 당신의 신원으로 행동합니다. 감독 없이 작동하며 비용을 지출할 수 있으니 테스트 중에는 devnet을 사용하세요. 기본값은 꺼짐입니다.',
+  'settings.agentAccess.tinyplaceAutopilot.label': '자동 실행',
   'settings.agentAccess.timeout.label': '작업 제한 시간',
   'settings.agentAccess.timeout.desc':
     '단일 도구나 작업이 취소되기 전까지 실행될 수 있는 시간입니다. 대형 로컬 모델이 응답을 끝내기 전에 중단되는 경우 이 값을 늘리세요.',

@@ -2062,6 +2062,14 @@ async fn run_server_inner(
                     return;
                 }
                 log::info!("[cron] spawning scheduler polling loop");
+                // Ensure proactive agent jobs (e.g. the autonomous bounty job)
+                // exist for already-onboarded users upgrading from a build that
+                // predates them — otherwise their Settings toggle stays hidden.
+                // Idempotent; no-op until onboarding is complete.
+                if let Err(e) = crate::openhuman::cron::seed::seed_proactive_agents_on_boot(&config)
+                {
+                    log::warn!("[cron] boot seed of proactive agent jobs failed: {e}");
+                }
                 if let Err(e) = crate::openhuman::cron::scheduler::run(config).await {
                     log::error!("[cron] scheduler loop ended with error: {e}");
                 }

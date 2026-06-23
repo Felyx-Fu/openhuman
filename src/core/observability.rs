@@ -226,6 +226,15 @@ pub enum ExpectedErrorKind {
     /// `is_network_unreachable_message` anchors miss the inner OS message.
     ChannelSupervisorRestart,
     ConfigLoadTimedOut,
+    /// A config-file READ failed because the OS refused access to a file that
+    /// exists (ACL-denied, held open by another process, OneDrive placeholder).
+    /// Unpreventable user-environment state — zero local lever to make the file
+    /// readable. Demoted only for the access-denied / locked io kinds; a
+    /// `NotFound` after the `exists()` check stays a paging defect. See
+    /// [`is_config_read_io_failure_message`]. Drops TAURI-RUST-DME
+    /// (`inference_downloads_progress` re-reads config every poll → 36k events /
+    /// 1 Windows user).
+    ConfigReadIoFailure,
     /// The subconscious engine's SQLite schema init couldn't open its database
     /// file at all — a host-filesystem condition, not a code bug. Two canonical
     /// renderings, both bound to the user's local FS:
@@ -481,6 +490,13 @@ pub fn expected_error_kind(message: &str) -> Option<ExpectedErrorKind> {
     if is_config_load_timed_out_message(&lower) {
         return Some(ExpectedErrorKind::ConfigLoadTimedOut);
     }
+    // OS-level config-read denial on a file that exists (user-environment, zero
+    // local lever). Keyed on the config-read anchor + an access-denied/locked io
+    // signal; NotFound / unseen kinds fall through and keep paging. Requires the
+    // loader to surface the full io chain (#3962).
+    if is_config_read_io_failure_message(&lower) {
+        return Some(ExpectedErrorKind::ConfigReadIoFailure);
+    }
     // Empty-provider-response re-report from the web-channel layer. Runs
     // last so an earlier, more specific matcher always wins. See the
     // variant doc-comment and [`is_empty_provider_response_message`] for
@@ -598,6 +614,55 @@ fn is_disk_full_message(lower: &str) -> bool {
 /// `Config::load_from_config_path`.
 fn is_config_load_timed_out_message(lower: &str) -> bool {
     lower.contains("config loading timed out")
+}
+
+/// Detect a config-file READ that failed because the operating system refused
+/// access to a file that **exists** — i.e. an unpreventable user-environment
+/// condition with zero local lever, not an OpenHuman defect.
+///
+/// `Config::load_or_init` (`impl_load.rs`) takes its read branch only after
+/// `config_path.exists()` returns true, then `read_to_string` is retried 5× and
+/// still fails. On a healthy install that never happens; in the wild a user's
+/// `config.toml` can be ACL-denied, held open by another process (antivirus /
+/// backup agent), or a OneDrive "files on demand" placeholder that won't
+/// hydrate. We cannot unlock or re-ACL a foreign-held file, so the per-poll
+/// re-report (TAURI-RUST-DME: `inference_downloads_progress` re-loads config on
+/// every poll → 36k events / 1 user) carries no Sentry-actionable signal.
+///
+/// Polarity contract — demote **only** when BOTH hold:
+///   1. an OpenHuman config-read context anchor is present — either
+///      `"failed to read config file"` (`load_or_init` retry path,
+///      `impl_load.rs`, the DME surface) or `"reading config.toml from"`
+///      (`load_from_config_path` snapshot-reload path) — AND
+///   2. an OS-level *access-denied / locked* signal is present.
+///
+/// `NotFound` (`os error 2` / "cannot find the file"), "is a directory", and any
+/// io kind not enumerated here are deliberately EXCLUDED: a file that vanished
+/// after the `exists()` check is a TOCTOU race / app defect and MUST keep
+/// paging. This matcher is only meaningful once the loader surfaces the full
+/// chain (`{:#}`, #3962) — the io fragment lives in the source, not the top
+/// `with_context` line.
+fn is_config_read_io_failure_message(lower: &str) -> bool {
+    let has_config_read_anchor =
+        lower.contains("failed to read config file") || lower.contains("reading config.toml from");
+    if !has_config_read_anchor {
+        return false;
+    }
+    // A directory (or otherwise non-regular file) at the config path is a
+    // bad-install / corruption signal that MUST keep paging. On Windows reading
+    // a directory surfaces the same `Access is denied. (os error 5)` shape as a
+    // genuine ACL denial, so the io-signal check below cannot tell them apart;
+    // the read site (`impl_load.rs`) now fails a directory fast with this
+    // distinct wording, and we belt-and-braces exclude it here too. (Codex P2.)
+    if lower.contains("is a directory") || lower.contains("not a file") {
+        return false;
+    }
+    lower.contains("access is denied")
+        || lower.contains("permission denied")
+        || lower.contains("being used by another process")
+        || lower.contains("cannot access the file")
+        || lower.contains("(os error 5)")
+        || lower.contains("(os error 32)")
 }
 
 /// Match whatsapp structured-ingest failures caused by transient SQLite lock
@@ -1775,6 +1840,23 @@ fn report_expected_message(kind: ExpectedErrorKind, message: &str, domain: &str,
                 kind = "config_load_timed_out",
                 error = %message,
                 "[observability] {domain}.{operation} skipped expected config-load timeout: {message}"
+            );
+        }
+        ExpectedErrorKind::ConfigReadIoFailure => {
+            // OS refused to read an existing config.toml (ACL-denied, locked by
+            // another process, OneDrive placeholder). User-environment state —
+            // we cannot make the file readable, and the same poll re-reports it
+            // every cycle (TAURI-RUST-DME). Demote at `warn!` so it stays in the
+            // local log for support without paging on every poll.
+            // Metadata-only: the raw message embeds the absolute config path
+            // (username / home dir). Keep this arm PII-free like the other
+            // path-sensitive demotions — domain/operation/kind are enough to
+            // see the condition without leaking the path into local logs.
+            tracing::warn!(
+                domain = domain,
+                operation = operation,
+                kind = "config_read_io_failure",
+                "[observability] {domain}.{operation} skipped expected config-read io failure (OS access denied/locked)"
             );
         }
         ExpectedErrorKind::SubconsciousSchemaUnavailable => {
@@ -3323,6 +3405,83 @@ mod tests {
         );
         // Bare "timed out" without the config-load phrase must not match.
         assert_eq!(expected_error_kind("cron job timed out after 30s"), None,);
+    }
+
+    #[test]
+    fn classifies_config_read_io_failure_for_os_denial_kinds() {
+        // TAURI-RUST-DME shape once the loader surfaces the full io chain
+        // (#3962): Windows access-denied on an existing config.toml.
+        assert_eq!(
+            expected_error_kind(
+                "Failed to read config file: C:\\Users\\u\\.openhuman\\users\\local-wb\\config.toml: Access is denied. (os error 5)"
+            ),
+            Some(ExpectedErrorKind::ConfigReadIoFailure),
+        );
+        // Sharing-violation: file held open by another process (antivirus /
+        // backup agent).
+        assert_eq!(
+            expected_error_kind(
+                "Failed to read config file: C:\\Users\\u\\.openhuman\\users\\local-wb\\config.toml: The process cannot access the file because it is being used by another process. (os error 32)"
+            ),
+            Some(ExpectedErrorKind::ConfigReadIoFailure),
+        );
+        // Unix permission-denied wording.
+        assert_eq!(
+            expected_error_kind(
+                "Failed to read config file: /home/u/.openhuman/users/local/config.toml: Permission denied (os error 13)"
+            ),
+            Some(ExpectedErrorKind::ConfigReadIoFailure),
+        );
+        // Snapshot-reload context anchor (`load_from_config_path`) must demote
+        // the same OS-denial family so a long-lived reloader can't leak either.
+        assert_eq!(
+            expected_error_kind(
+                "reading config.toml from C:\\Users\\u\\.openhuman\\users\\local-wb\\config.toml: Access is denied. (os error 5)"
+            ),
+            Some(ExpectedErrorKind::ConfigReadIoFailure),
+        );
+    }
+
+    #[test]
+    fn does_not_demote_config_read_notfound_or_unkeyed_failures() {
+        // NotFound AFTER the `exists()` gate is a TOCTOU race / app defect —
+        // it MUST keep paging, never demote.
+        assert_ne!(
+            expected_error_kind(
+                "Failed to read config file: C:\\Users\\u\\.openhuman\\users\\local-wb\\config.toml: The system cannot find the file specified. (os error 2)"
+            ),
+            Some(ExpectedErrorKind::ConfigReadIoFailure),
+        );
+        // Bare top-context line with no io signal (pre-#3962 shape, or an io
+        // kind we have not enumerated) must NOT demote — fail open to paging.
+        assert_ne!(
+            expected_error_kind(
+                "Failed to read config file: C:\\Users\\u\\.openhuman\\users\\local-wb\\config.toml"
+            ),
+            Some(ExpectedErrorKind::ConfigReadIoFailure),
+        );
+        // The access-denied signal alone, without the config-read anchor, must
+        // not be hijacked into the config bucket.
+        assert_ne!(
+            expected_error_kind("opening keychain failed: Access is denied. (os error 5)"),
+            Some(ExpectedErrorKind::ConfigReadIoFailure),
+        );
+        // A directory at the config path is corruption — keep paging even though
+        // it carries an access-denied / os-error-5 shape (Codex P2). Both the
+        // unix wording and the Windows os-error-5 + read-site wording are
+        // excluded by the `is a directory` / `not a file` guard.
+        assert_ne!(
+            expected_error_kind(
+                "Failed to read config file: /home/u/.openhuman/users/local/config.toml: Is a directory (os error 21)"
+            ),
+            Some(ExpectedErrorKind::ConfigReadIoFailure),
+        );
+        assert_ne!(
+            expected_error_kind(
+                "Config path is a directory, not a file: C:\\Users\\u\\.openhuman\\users\\local-wb\\config.toml: Access is denied. (os error 5)"
+            ),
+            Some(ExpectedErrorKind::ConfigReadIoFailure),
+        );
     }
 
     #[test]

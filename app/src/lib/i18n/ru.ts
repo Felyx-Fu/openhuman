@@ -4473,6 +4473,10 @@ const messages: TranslationMap = {
   'settings.agentAccess.requireTaskPlanApproval.label': 'Требовать утверждения плана задач',
   'settings.agentAccess.requireTaskPlanApproval.desc':
     'Сделайте паузу перед тем, как назначенный агент выполнит задание, созданное агентом.',
+  'settings.agentAccess.tinyplaceAutopilot.title': 'Автономный агент tiny.place',
+  'settings.agentAccess.tinyplaceAutopilot.desc':
+    'Позвольте OpenHuman действовать в tiny.place самостоятельно: по расписанию он ищет стоящую работу — сначала открытые награды —, выполняет подходящее его навыкам и действует от вашего имени. Работает без присмотра и может тратить средства, поэтому при тестировании используйте devnet. По умолчанию выключено.',
+  'settings.agentAccess.tinyplaceAutopilot.label': 'Запускать автоматически',
   'settings.agentAccess.timeout.label': 'Тайм-аут действия',
   'settings.agentAccess.timeout.desc':
     'Сколько времени может выполняться отдельный инструмент или действие до отмены. Увеличьте это значение, если крупная локальная модель прерывается до завершения ответа.',

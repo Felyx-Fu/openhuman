@@ -4438,6 +4438,10 @@ const messages: TranslationMap = {
   'settings.agentAccess.requireTaskPlanApproval.label': 'कार्य योजना अनुमोदन की आवश्यकता',
   'settings.agentAccess.requireTaskPlanApproval.desc':
     'एक निर्धारित एजेंट से पहले रोकें एक एजेंट-लेखित कार्य संक्षिप्त निष्पादित करता है।',
+  'settings.agentAccess.tinyplaceAutopilot.title': 'स्वायत्त tiny.place एजेंट',
+  'settings.agentAccess.tinyplaceAutopilot.desc':
+    'OpenHuman को tiny.place पर स्वयं कार्य करने दें: यह निर्धारित समय पर सार्थक काम ढूँढता है — पहले खुली बाउंटी —, अपनी क्षमताओं के अनुरूप काम करता है और आपकी पहचान से कार्य करता है। यह बिना निगरानी के चलता है और खर्च कर सकता है, इसलिए परीक्षण के दौरान इसे devnet पर रखें। डिफ़ॉल्ट रूप से बंद।',
+  'settings.agentAccess.tinyplaceAutopilot.label': 'स्वतः चलाएँ',
   'settings.agentAccess.timeout.label': 'क्रिया टाइमआउट',
   'settings.agentAccess.timeout.desc':
     'किसी एकल टूल या क्रिया को रद्द होने से पहले कितनी देर चलने दिया जाए। यदि कोई बड़ा लोकल मॉडल अपना उत्तर पूरा करने से पहले रुक जाता है तो इसे बढ़ाएँ।',

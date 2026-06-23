@@ -4217,6 +4217,10 @@ const messages: TranslationMap = {
   'settings.agentAccess.requireTaskPlanApproval.label': '要求批准任务计划',
   'settings.agentAccess.requireTaskPlanApproval.desc':
     '在指定智能体执行由智能体编写的任务简报前暂停。',
+  'settings.agentAccess.tinyplaceAutopilot.title': '自主 tiny.place 代理',
+  'settings.agentAccess.tinyplaceAutopilot.desc':
+    '让 OpenHuman 自行在 tiny.place 上行动：按计划寻找有价值的工作（优先开放的悬赏），完成符合其技能的任务，并以你的身份行动。它在无人监督下运行且可以花费资金，测试时请使用 devnet。默认关闭。',
+  'settings.agentAccess.tinyplaceAutopilot.label': '自动运行',
   'settings.agentAccess.timeout.label': '操作超时',
   'settings.agentAccess.timeout.desc':
     '单个工具或操作在被取消前可运行的时长。如果大型本地模型在完成响应前被中断，请增大此值。',
