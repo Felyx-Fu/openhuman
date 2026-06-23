@@ -1,8 +1,10 @@
 //! Verifies that with `OPENHUMAN_AGENTBOX_MODE` unset (the desktop default),
 //! the core HTTP router does NOT expose `/run` or `/jobs/{id}`.
 //!
-//! Env vars are process-global, so hold the shared AgentBox env test lock
-//! while building the router that reads `OPENHUMAN_AGENTBOX_MODE`.
+//! Env vars are process-global, so this test holds the AgentBox test env lock
+//! while it clears `OPENHUMAN_AGENTBOX_MODE` and builds the router.
+//! Authoritative coverage of the disabled-mode contract lives in the E2E test
+//! (Task 12) which boots a fresh process.
 
 use axum::body::Body;
 use axum::http::{Request, StatusCode};

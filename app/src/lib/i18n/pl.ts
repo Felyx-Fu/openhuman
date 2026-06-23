@@ -4,7 +4,7 @@ import type { TranslationMap } from './types';
 // English-identical values fall back to English via I18nContext.resolveEn().
 const messages: TranslationMap = {
   'conversations.backgroundTasks.title': 'Background tasks',
-  'nav.feedback': 'Opinie',
+  'nav.feedback': 'Podziel się opinią',
   'feedback.board': 'Tablica opinii',
   'feedback.empty':
     'Nie ma jeszcze żadnych opinii. Bądź pierwszą osobą, która podzieli się pomysłem.',
@@ -78,15 +78,15 @@ const messages: TranslationMap = {
   'nav.noAgentProfiles': 'Nie znaleziono profili agentów',
   'nav.activity': 'Aktywność',
   'nav.brain': 'Mózg',
-  'nav.agentWorld': 'Tiny.Place',
+  'nav.agentWorld': 'Tiny Place',
   'nav.wallet': 'Portfel',
   'agentWorld.description':
     'Tiny.Place to sieć społecznościowa dla agentów AI. Używaj OpenHuman, aby wchodzić w interakcje, znajdować i publikować zlecenia, handlować i wspólnie się rozwijać.',
   'agentWorld.world': 'Świat',
   'agentWorld.world.booting': 'Uruchamianie renderera...',
-  'agentWorld.world.title': 'Świat agentów',
+  'agentWorld.world.title': 'Tiny Place',
   'agentWorld.world.description':
-    'Zarejestruj swojego agenta w tiny.place, aby zaczął się poruszać.',
+    'Dołącz do tiny.place, aby Twój agent współpracował z innymi agentami: znajdował i publikował zlecenia, handlował, wysyłał wiadomości i działał przy nagrodach.',
   'agentWorld.world.room': 'Pokój',
   'agentWorld.world.rooms.poker.name': 'Poker',
   'agentWorld.world.rooms.poker.description': 'Osiem miejsc wokół stołu z filcem.',
@@ -136,6 +136,20 @@ const messages: TranslationMap = {
   'brain.tabs.memory': 'Pamięć',
   'brain.tabs.subconscious': 'Podświadomość',
   'brain.tabs.graph': 'Graf',
+  'brain.tabs.goals': 'Cele',
+  'brain.goals.title': 'Cele długoterminowe',
+  'brain.goals.description':
+    'Trwałe cele agenta we współpracy z Tobą. Edytuj je tutaj lub pozwól, aby Refleksja je zaktualizowała.',
+  'brain.goals.reflect': 'Refleksja',
+  'brain.goals.reflecting': 'Refleksja…',
+  'brain.goals.reflectDone': 'Cele zaktualizowane.',
+  'brain.goals.add': 'Dodaj',
+  'brain.goals.addPlaceholder': 'Dodaj cel długoterminowy…',
+  'brain.goals.empty':
+    'Brak celów. Dodaj jeden lub użyj Refleksji, aby utworzyć je na podstawie ostatniego kontekstu.',
+  'brain.goals.editGoal': 'Edytuj cel',
+  'brain.goals.deleteGoal': 'Usuń cel',
+  'brain.goals.actionError': 'Coś poszło nie tak. Spróbuj ponownie.',
   'brain.tabs.sources': 'Źródła',
   'brain.tabs.sync': 'Synchronizacja',
   'brain.empty': 'Twój mózg jest na razie pusty — połącz źródło, aby zacząć budować pamięć.',
@@ -1180,6 +1194,16 @@ const messages: TranslationMap = {
   'settings.embeddings.providerAria': 'Dostawca embeddings',
   'settings.embeddings.statusConfigured': 'Skonfigurowano',
   'settings.embeddings.statusNeedsKey': 'Wymaga klucza API',
+  'settings.embeddings.requiresSignIn': 'Wymagane logowanie do OpenHuman',
+  'settings.embeddings.managedLoginRequired':
+    'Zarządzane osadzania wymagają logowania do OpenHuman. Zaloguj się, aby użyć backendu OpenHuman.',
+  'settings.embeddings.managedBannerIntro':
+    'Zarządzane osadzania są kierowane przez backend OpenHuman i wymagają sesji konta OpenHuman.',
+  'settings.embeddings.managedBannerLocalSession':
+    'Zakończ sesję lokalną i zaloguj się, aby użyć tego dostawcy, albo przełącz się na lokalnego dostawcę osadzań lub dostawcę z własnym kluczem.',
+  'settings.embeddings.managedBannerRemoteSession':
+    'Zaloguj się ponownie, aby odświeżyć sesję OpenHuman, albo przełącz się na lokalnego dostawcę osadzań lub dostawcę z własnym kluczem.',
+  'settings.embeddings.signInAgain': 'Zaloguj się ponownie',
   'settings.embeddings.apiKeyLabel': 'Klucz API {provider}',
   'settings.embeddings.placeholderStored': '•••••••• (zapisane)',
   'settings.embeddings.placeholderKey': 'Wklej swój klucz API…',
@@ -1197,6 +1221,7 @@ const messages: TranslationMap = {
   'settings.embeddings.testConnection': 'Przetestuj połączenie',
   'settings.embeddings.testing': 'Testowanie…',
   'settings.embeddings.testSuccess': 'Połączono — wymiarów: {dims}',
+  'settings.embeddings.connectionTestFailed': 'Test nie powiódł się',
   'settings.embeddings.testFailed': 'Niepowodzenie: {error}',
   'settings.embeddings.saving': 'Zapisywanie…',
   'settings.embeddings.saved': 'Zapisano.',
@@ -2609,6 +2634,13 @@ const messages: TranslationMap = {
   'bootCheck.portConflictFixing': 'Naprawianie…',
   'bootCheck.portConflictFixFailed':
     'Automatyczna naprawa się nie powiodła. Zrestartuj komputer i spróbuj ponownie.',
+  'bootCheck.portConflictOwner': '{name} (PID {pid}) używa portu sieciowego potrzebnego OpenHuman.',
+  'bootCheck.portConflictGuidance':
+    'Zamknij ten program, aby zwolnić port, lub wymuś jego zamknięcie poniżej, a następnie spróbuj ponownie.',
+  'bootCheck.portConflictForceQuit': 'Wymuś zamknięcie {name}',
+  'bootCheck.portConflictForceQuitting': 'Zamykanie {name}…',
+  'bootCheck.portConflictForceQuitFailed':
+    'Nie udało się zamknąć tego programu. Może być konieczne zamknięcie go ręcznie i ponowienie próby.',
   'notifications.justNow': 'przed chwilą',
   'notifications.minAgo': '{n} min temu',
   'notifications.hrAgo': '{n} godz. temu',
@@ -3067,6 +3099,7 @@ const messages: TranslationMap = {
   'conversations.agentTaskInsights.sourcesHeading': 'Źródła',
   'conversations.agentTaskInsights.noSteps': 'Brak zarejestrowanych kroków',
   'conversations.agentTaskInsights.viewProcessSource': 'Zobacz pełne źródło procesu agenta',
+  'conversations.agentTaskInsights.processing': 'Przetwarzanie',
   'daemon.serviceBlockingGate.body':
     'Rdzeń OpenHuman nie odpowiada. Spróbuj ponownie lub pobierz najnowszą wersję aplikacji.',
   'daemon.serviceBlockingGate.downloadHint':
@@ -4640,6 +4673,9 @@ const messages: TranslationMap = {
     'Wyłączone — etykiety pojawiają się tylko po najechaniu lub dla aktywnej zakładki.',
   'settings.appearance.chatHeading': 'Czat',
   'settings.appearance.assistantTextMode': 'Odpowiedzi asystenta jako tekst',
+  'settings.appearance.hideAgentInsights': 'Ukryj myślenie agenta',
+  'settings.appearance.hideAgentInsightsDesc':
+    'Zwija oś czasu z krokami agenta na żywo w czacie. Migający link „Przetwarzanie” nadal pozwala otworzyć pełny przebieg.',
   'settings.appearance.assistantTextModeDesc':
     'Wyświetla odpowiedzi asystenta jako tekst bez ramki, a Twoje wiadomości pozostawia w dymkach.',
   'settings.mascot.active': 'Aktywny',
@@ -5080,6 +5116,44 @@ const messages: TranslationMap = {
   'upsell.usageLimit.resetsIn': 'Resetuje się {time}.',
   'upsell.usageLimit.upgradePlan': 'Podnieś plan',
   'upsell.usageLimit.weeklyInference': '{amount}',
+  'walkthrough.steps.startChat.title': 'Zacznij na czacie',
+  'walkthrough.steps.startChat.content':
+    'Czat jest punktem startowym. Nowe okna otwierają się z tym samym powitaniem i szybkimi akcjami z konfiguracji.',
+  'walkthrough.steps.sayHello.title': 'Przywitaj się',
+  'walkthrough.steps.sayHello.content':
+    'Kliknij tutaj, aby w dowolnym momencie rozpocząć rozmowę z asystentem AI.',
+  'walkthrough.steps.meetAi.title': 'Poznaj swoją AI',
+  'walkthrough.steps.meetAi.content':
+    'Tutaj odbywają się rozmowy. Zadawaj pytania, proś o podsumowania lub rozwijaj pomysły. Wszystko pozostaje wyszukiwalne.',
+  'walkthrough.steps.connectWorld.title': 'Połącz swój świat',
+  'walkthrough.steps.connectWorld.content':
+    'Gmail, Slack, WhatsApp i więcej: każde połączenie daje asystentowi nowe możliwości.',
+  'walkthrough.steps.messagingApps.title': 'Czatuj tam, gdzie już jesteś',
+  'walkthrough.steps.messagingApps.content':
+    'WhatsApp, Telegram, Slack, Discord: połącz komunikatory, aby asystent mógł dotrzeć do Ciebie wszędzie.',
+  'walkthrough.steps.settings.title': 'Dostosuj pod siebie',
+  'walkthrough.steps.settings.content':
+    'Preferencje, prywatność i powiadomienia są tutaj. Możesz uruchomić tę prezentację ponownie z tej strony.',
+  'walkthrough.steps.chatTab.title': 'Wróć do czatu',
+  'walkthrough.steps.chatTab.content': 'Użyj karty Chat, gdy chcesz wrócić do rozmów.',
+  'walkthrough.steps.humanTab.title': 'Poznaj profil Human',
+  'walkthrough.steps.humanTab.content':
+    'Human łączy Twój kontekst osobisty, tożsamość i profil widoczny dla asystenta.',
+  'walkthrough.steps.brainTab.title': 'Otwórz Brain',
+  'walkthrough.steps.brainTab.content':
+    'Brain to graf pamięci: miejsce, w którym sprawdzisz, co wie OpenHuman i jak łączą się idee.',
+  'walkthrough.steps.agentWorldTab.title': 'Odkryj Agent World',
+  'walkthrough.steps.agentWorldTab.content':
+    'Agent World to miejsce na agentów wielokrotnego użytku i wspólne automatyzacje.',
+  'walkthrough.steps.connectionsTab.title': 'Zarządzaj połączeniami',
+  'walkthrough.steps.connectionsTab.content':
+    'Connections jest zawsze dostępne w głównej nawigacji, gdy chcesz dodać lub zmienić usługi.',
+  'walkthrough.steps.feedbackTab.title': 'Wyślij opinię',
+  'walkthrough.steps.feedbackTab.content':
+    'Feedback daje bezpośrednie miejsce do zgłaszania problemów lub próśb o ulepszenia.',
+  'walkthrough.steps.allSet.title': 'Gotowe!',
+  'walkthrough.steps.allSet.content':
+    'Asystent zostawił Ci wiadomość powitalną: tu możesz czatować, pytać i rozwijać pomysły. Miłej zabawy!',
   'walkthrough.tooltip.letsGo': 'Zaczynamy!',
   'walkthrough.tooltip.next': 'Dalej →',
   'walkthrough.tooltip.skip': 'Pomiń przewodnik',

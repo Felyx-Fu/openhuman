@@ -4,7 +4,7 @@ import type { TranslationMap } from './types';
 // English-identical values fall back to English via I18nContext.resolveEn().
 const messages: TranslationMap = {
   'conversations.backgroundTasks.title': 'Background tasks',
-  'nav.feedback': 'الملاحظات',
+  'nav.feedback': 'شارك ملاحظاتك',
   'feedback.board': 'لوحة الملاحظات',
   'feedback.empty': 'لا توجد ملاحظات بعد. كن أول من يشارك فكرة.',
   'feedback.loadMore': 'تحميل المزيد',
@@ -77,14 +77,15 @@ const messages: TranslationMap = {
   'nav.noAgentProfiles': 'لم يتم العثور على ملفات وكلاء',
   'nav.activity': 'النشاط',
   'nav.brain': 'الدماغ',
-  'nav.agentWorld': 'Tiny.Place',
+  'nav.agentWorld': 'Tiny Place',
   'nav.wallet': 'المحفظة',
   'agentWorld.description':
     'Tiny.Place شبكة اجتماعية لوكلاء الذكاء الاصطناعي. استخدم OpenHuman للتفاعل والعثور على الوظائف ونشرها والتداول والنمو معًا.',
   'agentWorld.world': 'العالم',
   'agentWorld.world.booting': 'جارٍ تشغيل العارض...',
-  'agentWorld.world.title': 'عالم الوكلاء',
-  'agentWorld.world.description': 'سجّل وكيلك في tiny.place ليبدأ بالحركة داخل العالم.',
+  'agentWorld.world.title': 'Tiny Place',
+  'agentWorld.world.description':
+    'انضم إلى tiny.place ليتمكن وكيلك من التنسيق مع الوكلاء الآخرين: العثور على الوظائف ونشرها، والتداول، وتبادل الرسائل، والتعاون في المكافآت.',
   'agentWorld.world.room': 'الغرفة',
   'agentWorld.world.rooms.poker.name': 'بوكر',
   'agentWorld.world.rooms.poker.description': 'ثمانية مقاعد حول طاولة مكسوة باللباد.',
@@ -134,6 +135,18 @@ const messages: TranslationMap = {
   'brain.tabs.memory': 'الذاكرة',
   'brain.tabs.subconscious': 'اللاوعي',
   'brain.tabs.graph': 'الرسم البياني',
+  'brain.tabs.goals': 'الأهداف',
+  'brain.goals.title': 'الأهداف طويلة المدى',
+  'brain.goals.description': 'أهداف الوكيل الدائمة للعمل معك. عدّلها هنا أو دع التأمل يحدّثها.',
+  'brain.goals.reflect': 'تأمّل',
+  'brain.goals.reflecting': 'جارٍ التأمل…',
+  'brain.goals.reflectDone': 'تم تحديث الأهداف.',
+  'brain.goals.add': 'إضافة',
+  'brain.goals.addPlaceholder': 'أضف هدفًا طويل المدى…',
+  'brain.goals.empty': 'لا توجد أهداف بعد. أضف هدفًا أو استخدم التأمل لملئها من السياق الأخير.',
+  'brain.goals.editGoal': 'تعديل الهدف',
+  'brain.goals.deleteGoal': 'حذف الهدف',
+  'brain.goals.actionError': 'حدث خطأ ما. يرجى المحاولة مرة أخرى.',
   'brain.tabs.sources': 'المصادر',
   'brain.tabs.sync': 'المزامنة',
   'brain.empty': 'دماغك فارغ في الوقت الحالي — قم بربط مصدر لبدء بناء الذاكرة.',
@@ -1144,6 +1157,16 @@ const messages: TranslationMap = {
   'settings.embeddings.providerAria': 'مزود التضمينات',
   'settings.embeddings.statusConfigured': 'تم التهيئة',
   'settings.embeddings.statusNeedsKey': 'يحتاج مفتاح API',
+  'settings.embeddings.requiresSignIn': 'يتطلب تسجيل الدخول إلى OpenHuman',
+  'settings.embeddings.managedLoginRequired':
+    'تتطلب التضمينات المُدارة تسجيل الدخول إلى OpenHuman. سجّل الدخول لاستخدام خلفية OpenHuman.',
+  'settings.embeddings.managedBannerIntro':
+    'تمر التضمينات المُدارة عبر خلفية OpenHuman وتتطلب جلسة حساب OpenHuman.',
+  'settings.embeddings.managedBannerLocalSession':
+    'اخرج من الجلسة المحلية وسجّل الدخول لاستخدام هذا المزوّد، أو انتقل إلى مزوّد تضمينات محلي أو بمفتاحك الخاص.',
+  'settings.embeddings.managedBannerRemoteSession':
+    'سجّل الدخول مرة أخرى لتحديث جلسة OpenHuman، أو انتقل إلى مزوّد تضمينات محلي أو بمفتاحك الخاص.',
+  'settings.embeddings.signInAgain': 'تسجيل الدخول مرة أخرى',
   'settings.embeddings.apiKeyLabel': 'مفتاح API لـ {provider}',
   'settings.embeddings.placeholderStored': '•••••••• (مخزن)',
   'settings.embeddings.placeholderKey': 'الصق مفتاح API الخاص بك…',
@@ -1161,6 +1184,7 @@ const messages: TranslationMap = {
   'settings.embeddings.testConnection': 'اختبار الاتصال',
   'settings.embeddings.testing': 'جارٍ الاختبار…',
   'settings.embeddings.testSuccess': 'متصل — {dims} بُعد',
+  'settings.embeddings.connectionTestFailed': 'فشل الاختبار',
   'settings.embeddings.testFailed': 'فشل: {error}',
   'settings.embeddings.saving': 'جارٍ الحفظ…',
   'settings.embeddings.saved': 'تم الحفظ.',
@@ -2531,6 +2555,13 @@ const messages: TranslationMap = {
   'bootCheck.portConflictFixing': 'جارٍ الإصلاح…',
   'bootCheck.portConflictFixFailed':
     'لم ينجح الإصلاح التلقائي. يُرجى إعادة تشغيل الكمبيوتر والمحاولة مجددًا.',
+  'bootCheck.portConflictOwner': '{name} (المعرّف {pid}) يستخدم منفذ الشبكة الذي يحتاجه OpenHuman.',
+  'bootCheck.portConflictGuidance':
+    'أغلق ذلك البرنامج لتحرير المنفذ، أو افرض إنهاءه أدناه، ثم حاول مرة أخرى.',
+  'bootCheck.portConflictForceQuit': 'فرض إنهاء {name}',
+  'bootCheck.portConflictForceQuitting': 'جارٍ إغلاق {name}…',
+  'bootCheck.portConflictForceQuitFailed':
+    'تعذّر إغلاق ذلك البرنامج. قد تحتاج إلى إغلاقه يدويًا ثم إعادة المحاولة.',
   'notifications.justNow': 'الآن',
   'notifications.minAgo': 'منذ {n} د',
   'notifications.hrAgo': 'منذ {n} س',
@@ -2972,6 +3003,7 @@ const messages: TranslationMap = {
   'conversations.agentTaskInsights.sourcesHeading': 'المصادر',
   'conversations.agentTaskInsights.noSteps': 'لم يتم تسجيل أي خطوات',
   'conversations.agentTaskInsights.viewProcessSource': 'عرض مصدر عملية الوكيل الكامل',
+  'conversations.agentTaskInsights.processing': 'قيد المعالجة',
   'daemon.serviceBlockingGate.body': 'المحتوى',
   'daemon.serviceBlockingGate.downloadHint': 'تلميح التنزيل',
   'daemon.serviceBlockingGate.downloadLatest': 'تنزيل أحدث إصدار',
@@ -4478,6 +4510,9 @@ const messages: TranslationMap = {
     'عند إيقاف التشغيل، تظهر التسميات فقط عند التمرير أو لعلامة التبويب النشطة.',
   'settings.appearance.chatHeading': 'الدردشة',
   'settings.appearance.assistantTextMode': 'ردود المساعد كنص',
+  'settings.appearance.hideAgentInsights': 'إخفاء تفكير الوكيل',
+  'settings.appearance.hideAgentInsightsDesc':
+    'طيّ الجدول الزمني المباشر لخطوات الوكيل في المحادثة. سيظل رابط "قيد المعالجة" الوامض يتيح لك فتح العملية الكاملة.',
   'settings.appearance.assistantTextModeDesc':
     'اعرض ردود المساعد كنص بلا إطار مع إبقاء رسائلك داخل فقاعات.',
   'settings.mascot.active': 'نشط',
@@ -4906,6 +4941,42 @@ const messages: TranslationMap = {
   'upsell.usageLimit.resetsIn': 'يُعاد التعيين {time}.',
   'upsell.usageLimit.upgradePlan': 'ترقية الخطة',
   'upsell.usageLimit.weeklyInference': '{amount}',
+  'walkthrough.steps.startChat.title': 'ابدأ من الدردشة',
+  'walkthrough.steps.startChat.content':
+    'الدردشة هي نقطة البداية. تفتح النوافذ الجديدة بالترحيب نفسه والإجراءات السريعة التي رأيتها بعد الإعداد.',
+  'walkthrough.steps.sayHello.title': 'قل مرحباً',
+  'walkthrough.steps.sayHello.content': 'اضغط هنا لبدء محادثة مع مساعد الذكاء الاصطناعي في أي وقت.',
+  'walkthrough.steps.meetAi.title': 'تعرّف إلى الذكاء الاصطناعي',
+  'walkthrough.steps.meetAi.content':
+    'هنا تجري المحادثات. اطرح الأسئلة، واحصل على الملخصات، أو طوّر الأفكار. يبقى كل شيء قابلاً للبحث.',
+  'walkthrough.steps.connectWorld.title': 'صِل عالمك',
+  'walkthrough.steps.connectWorld.content':
+    'Gmail وSlack وWhatsApp والمزيد: كل اتصال يمنح مساعدك قدرات جديدة.',
+  'walkthrough.steps.messagingApps.title': 'تحدث حيث أنت بالفعل',
+  'walkthrough.steps.messagingApps.content':
+    'اربط WhatsApp وTelegram وSlack وDiscord حتى يتمكن مساعدك من الوصول إليك في أي مكان.',
+  'walkthrough.steps.settings.title': 'اجعله مناسباً لك',
+  'walkthrough.steps.settings.content':
+    'التفضيلات والخصوصية والإشعارات كلها هنا. يمكنك إعادة تشغيل هذه الجولة من هذه الصفحة في أي وقت.',
+  'walkthrough.steps.chatTab.title': 'ارجع إلى الدردشة',
+  'walkthrough.steps.chatTab.content': 'استخدم تبويب Chat عندما تريد الرجوع إلى محادثاتك.',
+  'walkthrough.steps.humanTab.title': 'تعرّف إلى ملف Human',
+  'walkthrough.steps.humanTab.content': 'يجمع Human سياقك الشخصي وهويتك والملف الذي يراه المساعد.',
+  'walkthrough.steps.brainTab.title': 'افتح Brain',
+  'walkthrough.steps.brainTab.content':
+    'Brain هو مخطط الذاكرة: المكان الذي تفحص فيه ما يعرفه OpenHuman وكيف ترتبط الأفكار.',
+  'walkthrough.steps.agentWorldTab.title': 'استكشف Agent World',
+  'walkthrough.steps.agentWorldTab.content':
+    'Agent World هو مكان الوكلاء القابلين لإعادة الاستخدام والأتمتة المشتركة.',
+  'walkthrough.steps.connectionsTab.title': 'إدارة الاتصالات',
+  'walkthrough.steps.connectionsTab.content':
+    'Connections متاح دائماً في التنقل الرئيسي عندما تريد إضافة الخدمات أو تعديلها.',
+  'walkthrough.steps.feedbackTab.title': 'إرسال ملاحظات',
+  'walkthrough.steps.feedbackTab.content':
+    'يوفر Feedback مكاناً مباشراً للإبلاغ عن المشاكل أو طلب التحسينات.',
+  'walkthrough.steps.allSet.title': 'كل شيء جاهز!',
+  'walkthrough.steps.allSet.content':
+    'ترك لك المساعد رسالة ترحيب: هذه مساحتك للدردشة وطرح الأسئلة وتطوير الأفكار. استمتع!',
   'walkthrough.tooltip.letsGo': 'هيا بنا!',
   'walkthrough.tooltip.next': 'التالي →',
   'walkthrough.tooltip.skip': 'تخطّي الجولة',

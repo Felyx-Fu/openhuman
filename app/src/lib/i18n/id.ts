@@ -4,7 +4,7 @@ import type { TranslationMap } from './types';
 // English-identical values fall back to English via I18nContext.resolveEn().
 const messages: TranslationMap = {
   'conversations.backgroundTasks.title': 'Background tasks',
-  'nav.feedback': 'Masukan',
+  'nav.feedback': 'Bagikan masukan',
   'feedback.board': 'Papan masukan',
   'feedback.empty': 'Belum ada masukan. Jadilah yang pertama membagikan ide.',
   'feedback.loadMore': 'Muat lebih banyak',
@@ -77,14 +77,15 @@ const messages: TranslationMap = {
   'nav.noAgentProfiles': 'Profil agen tidak ditemukan',
   'nav.activity': 'Aktivitas',
   'nav.brain': 'Otak',
-  'nav.agentWorld': 'Tiny.Place',
+  'nav.agentWorld': 'Tiny Place',
   'nav.wallet': 'Dompet',
   'agentWorld.description':
     'Tiny.Place adalah jejaring sosial untuk agen AI. Gunakan OpenHuman untuk berinteraksi, menemukan dan memasang pekerjaan, berdagang, serta tumbuh bersama.',
   'agentWorld.world': 'Dunia',
   'agentWorld.world.booting': 'Memulai perender...',
-  'agentWorld.world.title': 'Dunia agen',
-  'agentWorld.world.description': 'Daftarkan agen Anda di tiny.place agar mulai bergerak.',
+  'agentWorld.world.title': 'Tiny Place',
+  'agentWorld.world.description':
+    'Bergabunglah dengan tiny.place agar agen Anda dapat berkoordinasi dengan agen lain: menemukan dan memposting pekerjaan, berdagang, berkirim pesan, dan bekerja sama dalam bounty.',
   'agentWorld.world.room': 'Ruang',
   'agentWorld.world.rooms.poker.name': 'Poker',
   'agentWorld.world.rooms.poker.description': 'Delapan kursi mengelilingi meja felt.',
@@ -134,6 +135,20 @@ const messages: TranslationMap = {
   'brain.tabs.memory': 'Memori',
   'brain.tabs.subconscious': 'Alam Bawah Sadar',
   'brain.tabs.graph': 'Grafik',
+  'brain.tabs.goals': 'Tujuan',
+  'brain.goals.title': 'Tujuan jangka panjang',
+  'brain.goals.description':
+    'Tujuan tetap agen untuk bekerja dengan Anda. Edit di sini atau biarkan Refleksi memperbaruinya.',
+  'brain.goals.reflect': 'Refleksi',
+  'brain.goals.reflecting': 'Merefleksikan…',
+  'brain.goals.reflectDone': 'Tujuan diperbarui.',
+  'brain.goals.add': 'Tambah',
+  'brain.goals.addPlaceholder': 'Tambahkan tujuan jangka panjang…',
+  'brain.goals.empty':
+    'Belum ada tujuan. Tambahkan satu, atau gunakan Refleksi untuk mengisinya dari konteks terbaru.',
+  'brain.goals.editGoal': 'Edit tujuan',
+  'brain.goals.deleteGoal': 'Hapus tujuan',
+  'brain.goals.actionError': 'Terjadi kesalahan. Silakan coba lagi.',
   'brain.tabs.sources': 'Sumber',
   'brain.tabs.sync': 'Sinkronisasi',
   'brain.empty': 'Otak Anda masih kosong — hubungkan sumber untuk mulai membangun memori.',
@@ -1168,6 +1183,16 @@ const messages: TranslationMap = {
   'settings.embeddings.providerAria': 'Penyedia embedding',
   'settings.embeddings.statusConfigured': 'Dikonfigurasi',
   'settings.embeddings.statusNeedsKey': 'Perlu kunci API',
+  'settings.embeddings.requiresSignIn': 'Memerlukan masuk OpenHuman',
+  'settings.embeddings.managedLoginRequired':
+    'Embedding terkelola memerlukan masuk OpenHuman. Masuk untuk menggunakan backend OpenHuman.',
+  'settings.embeddings.managedBannerIntro':
+    'Embedding terkelola dirutekan melalui backend OpenHuman dan memerlukan sesi akun OpenHuman.',
+  'settings.embeddings.managedBannerLocalSession':
+    'Keluar dari sesi lokal dan masuk untuk menggunakan penyedia ini, atau beralih ke penyedia embedding lokal atau bawa-kunci-sendiri.',
+  'settings.embeddings.managedBannerRemoteSession':
+    'Masuk lagi untuk menyegarkan sesi OpenHuman Anda, atau beralih ke penyedia embedding lokal atau bawa-kunci-sendiri.',
+  'settings.embeddings.signInAgain': 'Masuk lagi',
   'settings.embeddings.apiKeyLabel': 'Kunci API {provider}',
   'settings.embeddings.placeholderStored': '•••••••• (disimpan)',
   'settings.embeddings.placeholderKey': 'Tempel kunci API Anda…',
@@ -1185,6 +1210,7 @@ const messages: TranslationMap = {
   'settings.embeddings.testConnection': 'Uji koneksi',
   'settings.embeddings.testing': 'Menguji…',
   'settings.embeddings.testSuccess': 'Terhubung — {dims} dimensi',
+  'settings.embeddings.connectionTestFailed': 'Pengujian gagal',
   'settings.embeddings.testFailed': 'Gagal: {error}',
   'settings.embeddings.saving': 'Menyimpan…',
   'settings.embeddings.saved': 'Tersimpan.',
@@ -2585,6 +2611,14 @@ const messages: TranslationMap = {
   'bootCheck.portConflictFixing': 'Memperbaiki…',
   'bootCheck.portConflictFixFailed':
     'Perbaikan otomatis tidak berhasil. Silakan restart komputer Anda dan coba lagi.',
+  'bootCheck.portConflictOwner':
+    '{name} (PID {pid}) sedang menggunakan port jaringan yang dibutuhkan OpenHuman.',
+  'bootCheck.portConflictGuidance':
+    'Tutup program tersebut untuk membebaskan port, atau paksa tutup di bawah, lalu coba lagi.',
+  'bootCheck.portConflictForceQuit': 'Paksa tutup {name}',
+  'bootCheck.portConflictForceQuitting': 'Menutup {name}…',
+  'bootCheck.portConflictForceQuitFailed':
+    'Tidak dapat menutup program tersebut. Anda mungkin perlu menutupnya secara manual, lalu coba lagi.',
   'notifications.justNow': 'baru saja',
   'notifications.minAgo': '{n}m lalu',
   'notifications.hrAgo': '{n}j lalu',
@@ -3037,6 +3071,7 @@ const messages: TranslationMap = {
   'conversations.agentTaskInsights.sourcesHeading': 'Sumber',
   'conversations.agentTaskInsights.noSteps': 'Tidak ada langkah yang tercatat',
   'conversations.agentTaskInsights.viewProcessSource': 'Lihat sumber proses agen lengkap',
+  'conversations.agentTaskInsights.processing': 'Memproses',
   'daemon.serviceBlockingGate.body': 'Isi',
   'daemon.serviceBlockingGate.downloadHint': 'Petunjuk unduhan',
   'daemon.serviceBlockingGate.downloadLatest': 'Unduh Versi Terbaru',
@@ -4581,6 +4616,9 @@ const messages: TranslationMap = {
     'Saat nonaktif, label hanya muncul saat diarahkan atau untuk tab yang aktif.',
   'settings.appearance.chatHeading': 'Chat',
   'settings.appearance.assistantTextMode': 'Respons asisten sebagai teks',
+  'settings.appearance.hideAgentInsights': 'Sembunyikan proses berpikir agen',
+  'settings.appearance.hideAgentInsightsDesc':
+    'Ciutkan lini masa langkah demi langkah agen secara langsung di obrolan. Tautan "Memproses" yang berkedip tetap memungkinkan Anda membuka proses lengkapnya.',
   'settings.appearance.assistantTextModeDesc':
     'Tampilkan balasan asisten sebagai teks tanpa bingkai, sementara pesan Anda tetap dalam gelembung.',
   'settings.mascot.active': 'Aktif',
@@ -5018,6 +5056,45 @@ const messages: TranslationMap = {
   'upsell.usageLimit.resetsIn': 'Akan direset {time}.',
   'upsell.usageLimit.upgradePlan': 'Upgrade paket',
   'upsell.usageLimit.weeklyInference': '{amount}',
+  'walkthrough.steps.startChat.title': 'Mulai di chat',
+  'walkthrough.steps.startChat.content':
+    'Chat adalah titik awal Anda. Jendela baru terbuka dengan sapaan dan tindakan cepat yang sama seperti setelah penyiapan.',
+  'walkthrough.steps.sayHello.title': 'Sapa dulu',
+  'walkthrough.steps.sayHello.content':
+    'Ketuk di sini untuk memulai percakapan dengan asisten AI kapan saja.',
+  'walkthrough.steps.meetAi.title': 'Kenali AI Anda',
+  'walkthrough.steps.meetAi.content':
+    'Di sinilah percakapan berlangsung. Ajukan pertanyaan, minta ringkasan, atau susun ide. Semuanya tetap bisa dicari.',
+  'walkthrough.steps.connectWorld.title': 'Hubungkan dunia Anda',
+  'walkthrough.steps.connectWorld.content':
+    'Gmail, Slack, WhatsApp, dan lainnya: setiap koneksi memberi asisten Anda kemampuan baru.',
+  'walkthrough.steps.messagingApps.title': 'Chat di tempat Anda biasa berada',
+  'walkthrough.steps.messagingApps.content':
+    'WhatsApp, Telegram, Slack, Discord: hubungkan aplikasi pesan agar asisten dapat menjangkau Anda di mana saja.',
+  'walkthrough.steps.settings.title': 'Sesuaikan sendiri',
+  'walkthrough.steps.settings.content':
+    'Preferensi, privasi, dan notifikasi ada di sini. Anda dapat memulai ulang tur ini dari halaman ini kapan saja.',
+  'walkthrough.steps.chatTab.title': 'Kembali ke chat',
+  'walkthrough.steps.chatTab.content':
+    'Gunakan tab Chat kapan pun Anda ingin kembali ke percakapan.',
+  'walkthrough.steps.humanTab.title': 'Kenali profil Human Anda',
+  'walkthrough.steps.humanTab.content':
+    'Human menyatukan konteks pribadi, identitas, dan profil yang dilihat asisten.',
+  'walkthrough.steps.brainTab.title': 'Buka Brain Anda',
+  'walkthrough.steps.brainTab.content':
+    'Brain adalah grafik memori: tempat melihat apa yang diketahui OpenHuman dan bagaimana ide saling terhubung.',
+  'walkthrough.steps.agentWorldTab.title': 'Jelajahi Agent World',
+  'walkthrough.steps.agentWorldTab.content':
+    'Agent World adalah tempat agen yang dapat digunakan ulang dan automasi bersama.',
+  'walkthrough.steps.connectionsTab.title': 'Kelola koneksi',
+  'walkthrough.steps.connectionsTab.content':
+    'Connections selalu tersedia di navigasi utama saat Anda ingin menambah atau menyesuaikan layanan.',
+  'walkthrough.steps.feedbackTab.title': 'Kirim masukan',
+  'walkthrough.steps.feedbackTab.content':
+    'Feedback memberi tempat langsung untuk melaporkan masalah atau meminta peningkatan.',
+  'walkthrough.steps.allSet.title': 'Semua siap!',
+  'walkthrough.steps.allSet.content':
+    'Asisten meninggalkan catatan sambutan: ini ruang Anda untuk chat, bertanya, atau menyusun ide. Selamat mencoba!',
   'walkthrough.tooltip.letsGo': 'Ayo mulai!',
   'walkthrough.tooltip.next': 'Berikutnya →',
   'walkthrough.tooltip.skip': 'Lewati tur',

@@ -4,7 +4,7 @@ import type { TranslationMap } from './types';
 // English-identical values fall back to English via I18nContext.resolveEn().
 const messages: TranslationMap = {
   'conversations.backgroundTasks.title': 'Background tasks',
-  'nav.feedback': 'Отзывы',
+  'nav.feedback': 'Поделиться отзывом',
   'feedback.board': 'Доска отзывов',
   'feedback.empty': 'Пока нет отзывов. Поделитесь идеей первым.',
   'feedback.loadMore': 'Загрузить ещё',
@@ -78,14 +78,15 @@ const messages: TranslationMap = {
   'nav.noAgentProfiles': 'Профили агентов не найдены',
   'nav.activity': 'Активность',
   'nav.brain': 'Мозг',
-  'nav.agentWorld': 'Tiny.Place',
+  'nav.agentWorld': 'Tiny Place',
   'nav.wallet': 'Кошелёк',
   'agentWorld.description':
     'Tiny.Place — это социальная сеть для ИИ-агентов. Используйте OpenHuman, чтобы взаимодействовать, находить и публиковать задания, торговать и расти вместе.',
   'agentWorld.world': 'Мир',
   'agentWorld.world.booting': 'Запуск рендерера...',
-  'agentWorld.world.title': 'Мир агентов',
-  'agentWorld.world.description': 'Зарегистрируйте агента в tiny.place, чтобы он начал двигаться.',
+  'agentWorld.world.title': 'Tiny Place',
+  'agentWorld.world.description':
+    'Присоединяйтесь к tiny.place, чтобы ваш агент взаимодействовал с другими агентами: находил и публиковал задания, торговал, обменивался сообщениями и работал над наградами.',
   'agentWorld.world.room': 'Комната',
   'agentWorld.world.rooms.poker.name': 'Покер',
   'agentWorld.world.rooms.poker.description': 'Восемь мест вокруг стола с сукном.',
@@ -135,6 +136,20 @@ const messages: TranslationMap = {
   'brain.tabs.memory': 'Память',
   'brain.tabs.subconscious': 'Подсознание',
   'brain.tabs.graph': 'Граф',
+  'brain.tabs.goals': 'Цели',
+  'brain.goals.title': 'Долгосрочные цели',
+  'brain.goals.description':
+    'Постоянные цели агента для работы с вами. Измените их здесь или позвольте Рефлексии обновить их.',
+  'brain.goals.reflect': 'Рефлексия',
+  'brain.goals.reflecting': 'Рефлексия…',
+  'brain.goals.reflectDone': 'Цели обновлены.',
+  'brain.goals.add': 'Добавить',
+  'brain.goals.addPlaceholder': 'Добавьте долгосрочную цель…',
+  'brain.goals.empty':
+    'Целей пока нет. Добавьте цель или используйте Рефлексию, чтобы сформировать их из недавнего контекста.',
+  'brain.goals.editGoal': 'Изменить цель',
+  'brain.goals.deleteGoal': 'Удалить цель',
+  'brain.goals.actionError': 'Что-то пошло не так. Пожалуйста, попробуйте снова.',
   'brain.tabs.sources': 'Источники',
   'brain.tabs.sync': 'Синхронизация',
   'brain.empty': 'Ваш мозг пока пуст — подключите источник, чтобы начать формировать память.',
@@ -1177,6 +1192,16 @@ const messages: TranslationMap = {
   'settings.embeddings.providerAria': 'Провайдер эмбеддингов',
   'settings.embeddings.statusConfigured': 'Настроено',
   'settings.embeddings.statusNeedsKey': 'Нужен API-ключ',
+  'settings.embeddings.requiresSignIn': 'Требуется вход в OpenHuman',
+  'settings.embeddings.managedLoginRequired':
+    'Для управляемых эмбеддингов требуется вход в OpenHuman. Войдите, чтобы использовать backend OpenHuman.',
+  'settings.embeddings.managedBannerIntro':
+    'Управляемые эмбеддинги проходят через backend OpenHuman и требуют сеанс учетной записи OpenHuman.',
+  'settings.embeddings.managedBannerLocalSession':
+    'Выйдите из локального сеанса и войдите, чтобы использовать этого провайдера, или переключитесь на локального провайдера эмбеддингов либо провайдера с собственным ключом.',
+  'settings.embeddings.managedBannerRemoteSession':
+    'Войдите снова, чтобы обновить сеанс OpenHuman, или переключитесь на локального провайдера эмбеддингов либо провайдера с собственным ключом.',
+  'settings.embeddings.signInAgain': 'Войти снова',
   'settings.embeddings.apiKeyLabel': 'API-ключ {provider}',
   'settings.embeddings.placeholderStored': '•••••••• (сохранено)',
   'settings.embeddings.placeholderKey': 'Вставьте API-ключ…',
@@ -1195,6 +1220,7 @@ const messages: TranslationMap = {
   'settings.embeddings.testConnection': 'Проверить подключение',
   'settings.embeddings.testing': 'Проверка…',
   'settings.embeddings.testSuccess': 'Подключено — {dims} измерений',
+  'settings.embeddings.connectionTestFailed': 'Проверка не удалась',
   'settings.embeddings.testFailed': 'Ошибка: {error}',
   'settings.embeddings.saving': 'Сохранение…',
   'settings.embeddings.saved': 'Сохранено.',
@@ -2604,6 +2630,13 @@ const messages: TranslationMap = {
   'bootCheck.portConflictFixing': 'Исправление…',
   'bootCheck.portConflictFixFailed':
     'Автоматическое исправление не сработало. Перезагрузите компьютер и попробуйте снова.',
+  'bootCheck.portConflictOwner': '{name} (PID {pid}) использует сетевой порт, нужный OpenHuman.',
+  'bootCheck.portConflictGuidance':
+    'Закройте эту программу, чтобы освободить порт, или принудительно завершите её ниже, затем повторите попытку.',
+  'bootCheck.portConflictForceQuit': 'Принудительно закрыть {name}',
+  'bootCheck.portConflictForceQuitting': 'Закрытие {name}…',
+  'bootCheck.portConflictForceQuitFailed':
+    'Не удалось закрыть эту программу. Возможно, потребуется закрыть её вручную и повторить попытку.',
   'notifications.justNow': 'только что',
   'notifications.minAgo': '{n} мин назад',
   'notifications.hrAgo': '{n} ч назад',
@@ -3057,6 +3090,7 @@ const messages: TranslationMap = {
   'conversations.agentTaskInsights.sourcesHeading': 'Источники',
   'conversations.agentTaskInsights.noSteps': 'Шаги не записаны',
   'conversations.agentTaskInsights.viewProcessSource': 'Показать полный источник процесса агента',
+  'conversations.agentTaskInsights.processing': 'Обработка',
   'daemon.serviceBlockingGate.body': 'Текст',
   'daemon.serviceBlockingGate.downloadHint': 'Подсказка по загрузке',
   'daemon.serviceBlockingGate.downloadLatest': 'Скачать последнюю версию',
@@ -4612,6 +4646,9 @@ const messages: TranslationMap = {
     'Если этот параметр отключен, метки отображаются только при наведении курсора мыши или на активной вкладке.',
   'settings.appearance.chatHeading': 'Чат',
   'settings.appearance.assistantTextMode': 'Ответы ассистента текстом',
+  'settings.appearance.hideAgentInsights': 'Скрыть размышления агента',
+  'settings.appearance.hideAgentInsightsDesc':
+    'Сворачивает пошаговую ленту действий агента в чате. Мигающая ссылка «Обработка» по-прежнему позволяет открыть весь процесс.',
   'settings.appearance.assistantTextModeDesc':
     'Показывает ответы ассистента как текст без рамки, оставляя ваши сообщения в пузырьках.',
   'settings.mascot.active': 'Активно',
@@ -5049,6 +5086,45 @@ const messages: TranslationMap = {
   'upsell.usageLimit.resetsIn': 'Сбросится {time}.',
   'upsell.usageLimit.upgradePlan': 'Улучшить план',
   'upsell.usageLimit.weeklyInference': '{amount}',
+  'walkthrough.steps.startChat.title': 'Начните в чате',
+  'walkthrough.steps.startChat.content':
+    'Чат — ваша отправная точка. Новые окна открываются с тем же приветствием и быстрыми действиями, которые вы видели после настройки.',
+  'walkthrough.steps.sayHello.title': 'Поздоровайтесь',
+  'walkthrough.steps.sayHello.content':
+    'Нажмите здесь, чтобы в любой момент начать разговор с ИИ-ассистентом.',
+  'walkthrough.steps.meetAi.title': 'Познакомьтесь с ИИ',
+  'walkthrough.steps.meetAi.content':
+    'Здесь проходят разговоры. Задавайте вопросы, получайте сводки или обдумывайте идеи. Все остается доступным для поиска.',
+  'walkthrough.steps.connectWorld.title': 'Подключите свой мир',
+  'walkthrough.steps.connectWorld.content':
+    'Gmail, Slack, WhatsApp и другое: каждое подключение дает ассистенту новые возможности.',
+  'walkthrough.steps.messagingApps.title': 'Общайтесь там, где уже работаете',
+  'walkthrough.steps.messagingApps.content':
+    'WhatsApp, Telegram, Slack, Discord: подключите мессенджеры, чтобы ассистент мог связаться с вами где угодно.',
+  'walkthrough.steps.settings.title': 'Настройте под себя',
+  'walkthrough.steps.settings.content':
+    'Предпочтения, приватность и уведомления находятся здесь. Этот тур можно перезапустить с этой страницы в любое время.',
+  'walkthrough.steps.chatTab.title': 'Вернуться в чат',
+  'walkthrough.steps.chatTab.content':
+    'Используйте вкладку Chat, когда хотите вернуться к разговорам.',
+  'walkthrough.steps.humanTab.title': 'Ваш профиль Human',
+  'walkthrough.steps.humanTab.content':
+    'Human объединяет личный контекст, идентичность и профиль, видимый ассистенту.',
+  'walkthrough.steps.brainTab.title': 'Откройте Brain',
+  'walkthrough.steps.brainTab.content':
+    'Brain — это граф памяти: здесь можно увидеть, что знает OpenHuman и как связаны идеи.',
+  'walkthrough.steps.agentWorldTab.title': 'Исследуйте Agent World',
+  'walkthrough.steps.agentWorldTab.content':
+    'Agent World — место для переиспользуемых агентов и общих автоматизаций.',
+  'walkthrough.steps.connectionsTab.title': 'Управляйте подключениями',
+  'walkthrough.steps.connectionsTab.content':
+    'Connections всегда доступен в основной навигации, когда нужно добавить или настроить сервисы.',
+  'walkthrough.steps.feedbackTab.title': 'Отправить отзыв',
+  'walkthrough.steps.feedbackTab.content':
+    'Feedback дает прямое место для сообщений о проблемах и просьб об улучшениях.',
+  'walkthrough.steps.allSet.title': 'Все готово!',
+  'walkthrough.steps.allSet.content':
+    'Ассистент оставил приветственную заметку: здесь можно общаться, задавать вопросы и развивать идеи. Удачи!',
   'walkthrough.tooltip.letsGo': 'Поехали!',
   'walkthrough.tooltip.next': 'Далее →',
   'walkthrough.tooltip.skip': 'Пропустить тур',

@@ -4,7 +4,7 @@ import type { TranslationMap } from './types';
 // English-identical values fall back to English via I18nContext.resolveEn().
 const messages: TranslationMap = {
   'conversations.backgroundTasks.title': 'Background tasks',
-  'nav.feedback': '피드백',
+  'nav.feedback': '피드백 보내기',
   'feedback.board': '피드백 보드',
   'feedback.empty': '아직 피드백이 없습니다. 가장 먼저 아이디어를 공유해 보세요.',
   'feedback.loadMore': '더 불러오기',
@@ -78,15 +78,15 @@ const messages: TranslationMap = {
   'nav.noAgentProfiles': '에이전트 프로필을 찾을 수 없습니다',
   'nav.activity': '활동',
   'nav.brain': '브레인',
-  'nav.agentWorld': 'Tiny.Place',
+  'nav.agentWorld': 'Tiny Place',
   'nav.wallet': '지갑',
   'agentWorld.description':
     'Tiny.Place는 AI 에이전트를 위한 소셜 네트워크입니다. OpenHuman을 사용해 소통하고, 일자리를 찾고 올리며, 거래하고 함께 성장하세요.',
   'agentWorld.world': '월드',
   'agentWorld.world.booting': '렌더러를 시작하는 중...',
-  'agentWorld.world.title': '에이전트 월드',
+  'agentWorld.world.title': 'Tiny Place',
   'agentWorld.world.description':
-    'tiny.place에 에이전트를 등록하면 월드 안에서 움직이기 시작합니다.',
+    'tiny.place에 참여하면 에이전트가 다른 에이전트와 협업할 수 있습니다: 작업을 찾고 게시하고, 거래하고, 메시지를 주고받고, 바운티에 함께 참여하세요.',
   'agentWorld.world.room': '방',
   'agentWorld.world.rooms.poker.name': '포커',
   'agentWorld.world.rooms.poker.description': '펠트 테이블을 둘러싼 여덟 좌석.',
@@ -136,6 +136,20 @@ const messages: TranslationMap = {
   'brain.tabs.memory': '기억',
   'brain.tabs.subconscious': '잠재의식',
   'brain.tabs.graph': '그래프',
+  'brain.tabs.goals': '목표',
+  'brain.goals.title': '장기 목표',
+  'brain.goals.description':
+    '당신과 함께 일하기 위한 에이전트의 지속적인 목표입니다. 여기서 편집하거나 리플렉트로 업데이트하세요.',
+  'brain.goals.reflect': '리플렉트',
+  'brain.goals.reflecting': '리플렉트 중…',
+  'brain.goals.reflectDone': '목표가 업데이트되었습니다.',
+  'brain.goals.add': '추가',
+  'brain.goals.addPlaceholder': '장기 목표 추가…',
+  'brain.goals.empty':
+    '아직 목표가 없습니다. 하나를 추가하거나 리플렉트로 최근 컨텍스트에서 채워 보세요.',
+  'brain.goals.editGoal': '목표 편집',
+  'brain.goals.deleteGoal': '목표 삭제',
+  'brain.goals.actionError': '문제가 발생했습니다. 다시 시도해 주세요.',
   'brain.tabs.sources': '소스',
   'brain.tabs.sync': '동기화',
   'brain.empty': '아직 브레인이 비어 있습니다 — 소스를 연결하여 메모리를 만들어 보세요.',
@@ -1161,6 +1175,16 @@ const messages: TranslationMap = {
   'settings.embeddings.providerAria': '임베딩 제공자',
   'settings.embeddings.statusConfigured': '구성됨',
   'settings.embeddings.statusNeedsKey': 'API 키 필요',
+  'settings.embeddings.requiresSignIn': 'OpenHuman 로그인 필요',
+  'settings.embeddings.managedLoginRequired':
+    '관리형 임베딩을 사용하려면 OpenHuman 로그인이 필요합니다. OpenHuman 백엔드를 사용하려면 로그인하세요.',
+  'settings.embeddings.managedBannerIntro':
+    '관리형 임베딩은 OpenHuman 백엔드를 통해 라우팅되며 OpenHuman 계정 세션이 필요합니다.',
+  'settings.embeddings.managedBannerLocalSession':
+    '이 공급자를 사용하려면 로컬 세션을 종료하고 로그인하거나, 로컬 또는 자체 키 임베딩 공급자로 전환하세요.',
+  'settings.embeddings.managedBannerRemoteSession':
+    'OpenHuman 세션을 새로 고치려면 다시 로그인하거나, 로컬 또는 자체 키 임베딩 공급자로 전환하세요.',
+  'settings.embeddings.signInAgain': '다시 로그인',
   'settings.embeddings.apiKeyLabel': '{provider} API 키',
   'settings.embeddings.placeholderStored': '•••••••(저장됨)',
   'settings.embeddings.placeholderKey': 'API 키를 붙여넣으세요…',
@@ -1178,6 +1202,7 @@ const messages: TranslationMap = {
   'settings.embeddings.testConnection': '연결 테스트',
   'settings.embeddings.testing': '테스트 중…',
   'settings.embeddings.testSuccess': '연결됨 — {dims} 차원',
+  'settings.embeddings.connectionTestFailed': '테스트 실패',
   'settings.embeddings.testFailed': '실패: {error}',
   'settings.embeddings.saving': '저장 중…',
   'settings.embeddings.saved': '저장됨.',
@@ -2559,6 +2584,14 @@ const messages: TranslationMap = {
   'bootCheck.portConflictFixing': '수정 중…',
   'bootCheck.portConflictFixFailed':
     '자동 수정에 실패했습니다. 컴퓨터를 재시작한 후 다시 시도해 주세요.',
+  'bootCheck.portConflictOwner':
+    '{name}(PID {pid})이(가) OpenHuman에 필요한 네트워크 포트를 사용하고 있습니다.',
+  'bootCheck.portConflictGuidance':
+    '포트를 비우려면 해당 프로그램을 닫거나 아래에서 강제 종료한 후 다시 시도하세요.',
+  'bootCheck.portConflictForceQuit': '{name} 강제 종료',
+  'bootCheck.portConflictForceQuitting': '{name} 종료 중…',
+  'bootCheck.portConflictForceQuitFailed':
+    '해당 프로그램을 닫지 못했습니다. 수동으로 닫은 후 다시 시도해야 할 수 있습니다.',
   'notifications.justNow': '방금 전',
   'notifications.minAgo': '{n}분 전',
   'notifications.hrAgo': '{n}시간 전',
@@ -3010,6 +3043,7 @@ const messages: TranslationMap = {
   'conversations.agentTaskInsights.sourcesHeading': '소스',
   'conversations.agentTaskInsights.noSteps': '기록된 단계 없음',
   'conversations.agentTaskInsights.viewProcessSource': '전체 에이전트 프로세스 소스 보기',
+  'conversations.agentTaskInsights.processing': '처리 중',
   'daemon.serviceBlockingGate.body': '본문',
   'daemon.serviceBlockingGate.downloadHint': '다운로드 안내',
   'daemon.serviceBlockingGate.downloadLatest': '최신 버전 다운로드',
@@ -4525,6 +4559,9 @@ const messages: TranslationMap = {
     '끄면 레이블은 마우스를 가져가거나 활성 탭에 대해서만 표시됩니다.',
   'settings.appearance.chatHeading': '채팅',
   'settings.appearance.assistantTextMode': '어시스턴트 답변을 텍스트로 표시',
+  'settings.appearance.hideAgentInsights': '에이전트 사고 숨기기',
+  'settings.appearance.hideAgentInsightsDesc':
+    '채팅에서 에이전트의 단계별 실시간 타임라인을 접습니다. 깜박이는 "처리 중" 링크로 전체 과정을 열 수 있습니다.',
   'settings.appearance.assistantTextModeDesc':
     '사용자 메시지는 말풍선으로 유지하고 어시스턴트 답변은 프레임 없는 텍스트로 표시합니다.',
   'settings.mascot.active': '활성',
@@ -4960,6 +4997,43 @@ const messages: TranslationMap = {
   'upsell.usageLimit.resetsIn': '{time}에 초기화됩니다.',
   'upsell.usageLimit.upgradePlan': '플랜 업그레이드',
   'upsell.usageLimit.weeklyInference': '{amount}',
+  'walkthrough.steps.startChat.title': '채팅에서 시작하기',
+  'walkthrough.steps.startChat.content':
+    '채팅이 시작점입니다. 새 창은 설정 후 보았던 같은 인사와 빠른 작업으로 열립니다.',
+  'walkthrough.steps.sayHello.title': '인사하기',
+  'walkthrough.steps.sayHello.content': '언제든 여기를 눌러 AI 어시스턴트와 대화를 시작하세요.',
+  'walkthrough.steps.meetAi.title': 'AI 만나기',
+  'walkthrough.steps.meetAi.content':
+    '대화가 이루어지는 곳입니다. 질문하고, 요약을 받고, 아이디어를 정리하세요. 모든 내용은 검색할 수 있습니다.',
+  'walkthrough.steps.connectWorld.title': '내 세계 연결하기',
+  'walkthrough.steps.connectWorld.content':
+    'Gmail, Slack, WhatsApp 등 각 연결은 어시스턴트에 더 많은 기능을 더합니다.',
+  'walkthrough.steps.messagingApps.title': '이미 쓰는 곳에서 채팅하기',
+  'walkthrough.steps.messagingApps.content':
+    'WhatsApp, Telegram, Slack, Discord를 연결하면 어시스턴트가 어디서든 연락할 수 있습니다.',
+  'walkthrough.steps.settings.title': '내 방식으로 설정하기',
+  'walkthrough.steps.settings.content':
+    '환경설정, 개인정보, 알림이 모두 여기에 있습니다. 이 페이지에서 언제든 투어를 다시 시작할 수 있습니다.',
+  'walkthrough.steps.chatTab.title': '채팅으로 돌아가기',
+  'walkthrough.steps.chatTab.content': '대화로 돌아가고 싶을 때 Chat 탭을 사용하세요.',
+  'walkthrough.steps.humanTab.title': 'Human 프로필 보기',
+  'walkthrough.steps.humanTab.content':
+    'Human은 개인 맥락, 정체성, 어시스턴트가 보는 프로필을 한곳에 모읍니다.',
+  'walkthrough.steps.brainTab.title': 'Brain 열기',
+  'walkthrough.steps.brainTab.content':
+    'Brain은 메모리 그래프입니다. OpenHuman이 무엇을 알고 아이디어가 어떻게 연결되는지 확인하는 곳입니다.',
+  'walkthrough.steps.agentWorldTab.title': 'Agent World 탐색',
+  'walkthrough.steps.agentWorldTab.content':
+    'Agent World에는 재사용 가능한 에이전트와 공유 자동화가 있습니다.',
+  'walkthrough.steps.connectionsTab.title': '연결 관리',
+  'walkthrough.steps.connectionsTab.content':
+    '서비스를 추가하거나 조정하고 싶을 때 Connections는 항상 기본 내비게이션에 있습니다.',
+  'walkthrough.steps.feedbackTab.title': '피드백 보내기',
+  'walkthrough.steps.feedbackTab.content':
+    'Feedback은 문제를 보고하거나 개선을 요청하는 직접적인 공간입니다.',
+  'walkthrough.steps.allSet.title': '준비 완료!',
+  'walkthrough.steps.allSet.content':
+    '어시스턴트가 환영 메모를 남겼습니다. 이곳에서 채팅하고, 질문하고, 아이디어를 정리해 보세요. 즐겁게 사용하세요!',
   'walkthrough.tooltip.letsGo': '시작해 봅시다!',
   'walkthrough.tooltip.next': '다음 →',
   'walkthrough.tooltip.skip': '투어 건너뛰기',

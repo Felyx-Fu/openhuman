@@ -28,6 +28,8 @@ import OpenhumanLinkModal from './components/OpenhumanLinkModal';
 import PersistRehydrationScreen from './components/PersistRehydrationScreen';
 import PttHotkeyManager from './components/PttHotkeyManager';
 import SecurityBanner from './components/SecurityBanner';
+import SettingsModal from './components/settings/modal/SettingsModal';
+import { resolveSettingsOverlay } from './components/settings/modal/settingsOverlay';
 import GlobalUpsellBanner from './components/upsell/GlobalUpsellBanner';
 import AppWalkthrough from './components/walkthrough/AppWalkthrough';
 import { MascotFrameProducer } from './features/meet/MascotFrameProducer';
@@ -244,6 +246,12 @@ export function AppShellDesktop() {
   );
   const chromeless = !token || onOnboardingRoute || onHiddenChromePath;
 
+  // Desktop Settings is a modal overlay (the backgroundLocation pattern): when
+  // the URL is a settings path we keep rendering the page *behind* it
+  // (`baseLocation`) and mount <SettingsModal/> on top (z-50 portal), which sits
+  // above the provider WebviewHost overlay (z-30) below.
+  const { settingsOpen, baseLocation } = resolveSettingsOverlay(location);
+
   const activeProviderAccount =
     activeAccountId && activeAccountId !== AGENT_ACCOUNT_ID
       ? (accountsById[activeAccountId] ?? null)
@@ -252,7 +260,7 @@ export function AppShellDesktop() {
   const content = (
     <div ref={scrollRef} className="relative h-full overflow-y-auto">
       <GlobalUpsellBanner />
-      <AppRoutes />
+      <AppRoutes location={baseLocation} />
       {activeProviderAccount && !accountsOverlayOpen && (
         <div className="absolute inset-0 z-30">
           <WebviewHost
@@ -275,6 +283,9 @@ export function AppShellDesktop() {
             <RootShellLayout sidebar={<AppSidebar />}>{content}</RootShellLayout>
           )}
         </div>
+        {/* Desktop Settings modal — mounted over whatever page is rendered
+            beneath when the URL is a settings path. */}
+        {settingsOpen && !chromeless && <SettingsModal />}
         <OpenhumanLinkModal />
         {/* Hidden Remotion-driven producer for the Meet camera. Mounts a
             640×480 JPEG frame stream to the Rust frame bus while a meet

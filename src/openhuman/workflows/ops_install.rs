@@ -104,8 +104,10 @@ pub struct InstallWorkflowFromUrlOutcome {
 /// * Frontmatter is validated — `name` and `description` are required per
 ///   the agentskills.io spec.
 /// * The slug is derived from `metadata.id` when present, otherwise the
-///   sanitized `name` field. Collision with an existing directory is fatal
-///   (no silent overwrite).
+///   sanitized `name` field. If the target directory already contains a
+///   `SKILL.md`, the install is treated as an idempotent success and reports
+///   that the skill is already installed. Other directory collisions remain
+///   fatal, and existing files are never silently overwritten.
 /// * Write is atomic: `SKILL.md.tmp` in the target dir, then `rename` on
 ///   success.
 ///
@@ -115,6 +117,15 @@ pub struct InstallWorkflowFromUrlOutcome {
 pub async fn install_workflow_from_url(
     workspace_dir: &Path,
     params: InstallWorkflowFromUrlParams,
+) -> Result<InstallWorkflowFromUrlOutcome, String> {
+    let home = dirs::home_dir();
+    install_workflow_from_url_with_home(workspace_dir, params, home.as_deref()).await
+}
+
+pub(crate) async fn install_workflow_from_url_with_home(
+    workspace_dir: &Path,
+    params: InstallWorkflowFromUrlParams,
+    home: Option<&Path>,
 ) -> Result<InstallWorkflowFromUrlOutcome, String> {
     let raw_url = params.url.trim().to_string();
     validate_install_url(&raw_url)?;
@@ -148,10 +159,9 @@ pub async fn install_workflow_from_url(
         "[skills] install_workflow_from_url: entry"
     );
 
-    let home = dirs::home_dir();
     let trusted_before = is_workspace_trusted(workspace_dir);
     let before: std::collections::HashSet<String> =
-        discover_workflows_inner(home.as_deref(), Some(workspace_dir), trusted_before)
+        discover_workflows_inner(home, Some(workspace_dir), trusted_before)
             .into_iter()
             .map(|s| s.name)
             .collect();
@@ -256,16 +266,36 @@ pub async fn install_workflow_from_url(
     // a `<ws>/.openhuman/trust` marker and would render the install invisible to the
     // skills list until the user opts the workspace into trust.
     let skills_root = home
-        .as_deref()
         .ok_or_else(|| "write failed: unable to resolve home directory".to_string())?
         .join(".openhuman")
         .join("skills");
     let target_dir = skills_root.join(&slug);
     if target_dir.exists() {
-        return Err(format!(
-            "skill already installed as {slug:?} at {}",
-            target_dir.display()
-        ));
+        let target_file = target_dir.join(SKILL_MD);
+        if !target_file.is_file() {
+            return Err(format!(
+                "skill install target already exists but has no {SKILL_MD}: {}",
+                target_dir.display()
+            ));
+        }
+
+        tracing::info!(
+            raw_url = %redacted_raw_url,
+            fetch_url = %redacted_fetch_url,
+            slug = %slug,
+            target = %target_file.display(),
+            "[skills] install_workflow_from_url: already installed"
+        );
+
+        return Ok(InstallWorkflowFromUrlOutcome {
+            url: raw_url,
+            stdout: format!(
+                "Skill {slug:?} is already installed at {}",
+                target_file.display()
+            ),
+            stderr: parse_warnings.join("\n"),
+            new_skills: Vec::new(),
+        });
     }
 
     std::fs::create_dir_all(&target_dir).map_err(|e| {
@@ -319,7 +349,7 @@ pub async fn install_workflow_from_url(
     }
 
     let trusted_after = is_workspace_trusted(workspace_dir);
-    let after = discover_workflows_inner(home.as_deref(), Some(workspace_dir), trusted_after);
+    let after = discover_workflows_inner(home, Some(workspace_dir), trusted_after);
     let new_skills: Vec<String> = after
         .into_iter()
         .map(|s| s.name)

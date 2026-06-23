@@ -96,7 +96,14 @@ const persistedLocaleReducer = persistReducer(localePersistConfig, localeReducer
 const themePersistConfig = {
   key: 'theme',
   storage: localStorageAdapter,
-  whitelist: ['mode', 'tabBarLabels', 'fontSize', 'agentMessageViewMode', 'developerMode'],
+  whitelist: [
+    'mode',
+    'tabBarLabels',
+    'fontSize',
+    'agentMessageViewMode',
+    'developerMode',
+    'hideAgentInsights',
+  ],
 };
 const persistedThemeReducer = persistReducer(themePersistConfig, themeReducer);
 

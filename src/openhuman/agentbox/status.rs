@@ -43,8 +43,9 @@ mod tests {
     use super::*;
     use crate::openhuman::agentbox::env::AGENTBOX_MODE_ENV_VAR;
 
-    // Env vars are process-global; hold the shared AgentBox env lock while
-    // toggling them and restore every prior value before releasing the lock.
+    // Env vars are process-global; hold the AgentBox test env lock so these
+    // tests do not race each other, and restore values even if the closure
+    // panics so later tests do not inherit dirty state.
     fn with_clean_env<F: FnOnce()>(f: F) {
         let _lock = super::super::test_support::test_env_lock();
         let prior_mode = std::env::var(AGENTBOX_MODE_ENV_VAR).ok();

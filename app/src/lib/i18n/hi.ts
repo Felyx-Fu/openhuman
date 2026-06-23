@@ -4,7 +4,7 @@ import type { TranslationMap } from './types';
 // English-identical values fall back to English via I18nContext.resolveEn().
 const messages: TranslationMap = {
   'conversations.backgroundTasks.title': 'Background tasks',
-  'nav.feedback': 'फ़ीडबैक',
+  'nav.feedback': 'फ़ीडबैक साझा करें',
   'feedback.board': 'फ़ीडबैक बोर्ड',
   'feedback.empty': 'अभी तक कोई फ़ीडबैक नहीं है। कोई विचार साझा करने वाले पहले व्यक्ति बनें।',
   'feedback.loadMore': 'और लोड करें',
@@ -78,14 +78,15 @@ const messages: TranslationMap = {
   'nav.noAgentProfiles': 'कोई एजेंट प्रोफाइल नहीं मिला',
   'nav.activity': 'गतिविधि',
   'nav.brain': 'ब्रेन',
-  'nav.agentWorld': 'Tiny.Place',
+  'nav.agentWorld': 'Tiny Place',
   'nav.wallet': 'वॉलेट',
   'agentWorld.description':
     'Tiny.Place एआई एजेंट्स के लिए एक सोशल नेटवर्क है। बातचीत करने, काम खोजने और पोस्ट करने, व्यापार करने और साथ मिलकर आगे बढ़ने के लिए OpenHuman का उपयोग करें।',
   'agentWorld.world': 'दुनिया',
   'agentWorld.world.booting': 'रेंडरर शुरू हो रहा है...',
-  'agentWorld.world.title': 'एजेंट दुनिया',
-  'agentWorld.world.description': 'अपने एजेंट को tiny.place पर रजिस्टर करें ताकि वह चलना शुरू करे।',
+  'agentWorld.world.title': 'Tiny Place',
+  'agentWorld.world.description':
+    'tiny.place से जुड़ें ताकि आपका एजेंट दूसरे एजेंट्स के साथ तालमेल कर सके — काम ढूँढना और पोस्ट करना, व्यापार करना, संदेश भेजना और बाउंटी पर मिलकर काम करना।',
   'agentWorld.world.room': 'कमरा',
   'agentWorld.world.rooms.poker.name': 'पोकर',
   'agentWorld.world.rooms.poker.description': 'फेल्ट टेबल के चारों ओर आठ सीटें।',
@@ -135,6 +136,20 @@ const messages: TranslationMap = {
   'brain.tabs.memory': 'स्मृति',
   'brain.tabs.subconscious': 'अवचेतन',
   'brain.tabs.graph': 'ग्राफ़',
+  'brain.tabs.goals': 'लक्ष्य',
+  'brain.goals.title': 'दीर्घकालिक लक्ष्य',
+  'brain.goals.description':
+    'आपके साथ काम करने के लिए एजेंट के स्थायी लक्ष्य। इन्हें यहाँ संपादित करें या Reflect से अपडेट होने दें।',
+  'brain.goals.reflect': 'रिफ़्लेक्ट',
+  'brain.goals.reflecting': 'रिफ़्लेक्ट हो रहा है…',
+  'brain.goals.reflectDone': 'लक्ष्य अपडेट हो गए।',
+  'brain.goals.add': 'जोड़ें',
+  'brain.goals.addPlaceholder': 'एक दीर्घकालिक लक्ष्य जोड़ें…',
+  'brain.goals.empty':
+    'अभी कोई लक्ष्य नहीं है। एक जोड़ें, या हाल के संदर्भ से भरने के लिए Reflect का उपयोग करें।',
+  'brain.goals.editGoal': 'लक्ष्य संपादित करें',
+  'brain.goals.deleteGoal': 'लक्ष्य हटाएँ',
+  'brain.goals.actionError': 'कुछ गलत हो गया। कृपया पुनः प्रयास करें।',
   'brain.tabs.sources': 'स्रोत',
   'brain.tabs.sync': 'सिंक',
   'brain.empty': 'आपका ब्रेन अभी खाली है — मेमोरी बनाना शुरू करने के लिए कोई स्रोत कनेक्ट करें।',
@@ -1160,6 +1175,16 @@ const messages: TranslationMap = {
   'settings.embeddings.providerAria': 'एम्बेडिंग प्रदाता',
   'settings.embeddings.statusConfigured': 'कॉन्फ़िगर किया गया',
   'settings.embeddings.statusNeedsKey': 'API कुंजी चाहिए',
+  'settings.embeddings.requiresSignIn': 'OpenHuman साइन-इन आवश्यक',
+  'settings.embeddings.managedLoginRequired':
+    'प्रबंधित एम्बेडिंग के लिए OpenHuman साइन-इन आवश्यक है। OpenHuman बैकएंड का उपयोग करने के लिए साइन इन करें।',
+  'settings.embeddings.managedBannerIntro':
+    'प्रबंधित एम्बेडिंग OpenHuman बैकएंड से होकर चलते हैं और OpenHuman खाता सत्र की आवश्यकता होती है।',
+  'settings.embeddings.managedBannerLocalSession':
+    'इस प्रदाता का उपयोग करने के लिए स्थानीय सत्र से बाहर निकलें और साइन इन करें, या स्थानीय/अपनी-कुंजी वाले एम्बेडिंग प्रदाता पर स्विच करें।',
+  'settings.embeddings.managedBannerRemoteSession':
+    'अपने OpenHuman सत्र को रीफ़्रेश करने के लिए फिर से साइन इन करें, या स्थानीय/अपनी-कुंजी वाले एम्बेडिंग प्रदाता पर स्विच करें।',
+  'settings.embeddings.signInAgain': 'फिर से साइन इन करें',
   'settings.embeddings.apiKeyLabel': '{provider} API कुंजी',
   'settings.embeddings.placeholderStored': '•••••••• (संग्रहीत)',
   'settings.embeddings.placeholderKey': 'अपनी API कुंजी पेस्ट करें…',
@@ -1178,6 +1203,7 @@ const messages: TranslationMap = {
   'settings.embeddings.testConnection': 'कनेक्शन परीक्षण',
   'settings.embeddings.testing': 'परीक्षण हो रहा है…',
   'settings.embeddings.testSuccess': 'कनेक्ट — {dims} आयाम',
+  'settings.embeddings.connectionTestFailed': 'परीक्षण विफल',
   'settings.embeddings.testFailed': 'विफल: {error}',
   'settings.embeddings.saving': 'सहेजा जा रहा है…',
   'settings.embeddings.saved': 'सहेजा गया।',
@@ -2581,6 +2607,14 @@ const messages: TranslationMap = {
   'bootCheck.portConflictFixing': 'ठीक हो रहा है…',
   'bootCheck.portConflictFixFailed':
     'स्वचालित सुधार काम नहीं आया। कृपया अपना कंप्यूटर पुनः आरंभ करें और पुनः प्रयास करें।',
+  'bootCheck.portConflictOwner':
+    '{name} (PID {pid}) उस नेटवर्क पोर्ट का उपयोग कर रहा है जिसकी OpenHuman को ज़रूरत है।',
+  'bootCheck.portConflictGuidance':
+    'पोर्ट खाली करने के लिए उस प्रोग्राम को बंद करें, या नीचे से उसे ज़बरदस्ती बंद करें, फिर पुनः प्रयास करें।',
+  'bootCheck.portConflictForceQuit': '{name} को ज़बरदस्ती बंद करें',
+  'bootCheck.portConflictForceQuitting': '{name} बंद हो रहा है…',
+  'bootCheck.portConflictForceQuitFailed':
+    'वह प्रोग्राम बंद नहीं किया जा सका। आपको इसे मैन्युअल रूप से बंद करके पुनः प्रयास करना पड़ सकता है।',
   'notifications.justNow': 'अभी-अभी',
   'notifications.minAgo': '{n}मि. पहले',
   'notifications.hrAgo': '{n}घं. पहले',
@@ -3034,6 +3068,7 @@ const messages: TranslationMap = {
   'conversations.agentTaskInsights.sourcesHeading': 'स्रोत',
   'conversations.agentTaskInsights.noSteps': 'कोई चरण दर्ज नहीं किया गया',
   'conversations.agentTaskInsights.viewProcessSource': 'पूर्ण एजेंट प्रक्रिया स्रोत देखें',
+  'conversations.agentTaskInsights.processing': 'प्रोसेसिंग',
   'daemon.serviceBlockingGate.body': 'विवरण',
   'daemon.serviceBlockingGate.downloadHint': 'डाउनलोड संकेत',
   'daemon.serviceBlockingGate.downloadLatest': 'नवीनतम संस्करण डाउनलोड करें',
@@ -4572,6 +4607,9 @@ const messages: TranslationMap = {
     'बंद होने पर, लेबल केवल होवर पर या सक्रिय टैब के लिए दिखाई देते हैं।',
   'settings.appearance.chatHeading': 'चैट',
   'settings.appearance.assistantTextMode': 'असिस्टेंट जवाब टेक्स्ट में',
+  'settings.appearance.hideAgentInsights': 'एजेंट की सोच छिपाएँ',
+  'settings.appearance.hideAgentInsightsDesc':
+    'चैट में एजेंट की चरण-दर-चरण लाइव टाइमलाइन को छिपाएँ। एक ब्लिंक करता "प्रोसेसिंग" लिंक फिर भी आपको पूरी प्रक्रिया खोलने देता है।',
   'settings.appearance.assistantTextModeDesc':
     'असिस्टेंट के जवाबों को बिना फ्रेम वाले टेक्स्ट के रूप में दिखाएं और आपके संदेश बबल में रखें।',
   'settings.mascot.active': 'एक्टिव',
@@ -5006,6 +5044,44 @@ const messages: TranslationMap = {
   'upsell.usageLimit.resetsIn': 'यह {time} रीसेट होती है।',
   'upsell.usageLimit.upgradePlan': 'प्लान अपग्रेड करें',
   'upsell.usageLimit.weeklyInference': '{amount}',
+  'walkthrough.steps.startChat.title': 'चैट से शुरू करें',
+  'walkthrough.steps.startChat.content':
+    'चैट आपका शुरुआती स्थान है। नई विंडो उसी स्वागत संदेश और तेज़ कार्रवाइयों के साथ खुलती हैं जो आपने सेटअप के बाद देखीं।',
+  'walkthrough.steps.sayHello.title': 'नमस्ते कहें',
+  'walkthrough.steps.sayHello.content':
+    'कभी भी अपने AI सहायक से बातचीत शुरू करने के लिए यहां टैप करें।',
+  'walkthrough.steps.meetAi.title': 'अपने AI से मिलें',
+  'walkthrough.steps.meetAi.content':
+    'बातचीत यहीं होती है। सवाल पूछें, सारांश लें या विचार करें। सब कुछ खोजने योग्य रहता है।',
+  'walkthrough.steps.connectWorld.title': 'अपनी दुनिया जोड़ें',
+  'walkthrough.steps.connectWorld.content':
+    'Gmail, Slack, WhatsApp और बहुत कुछ: हर कनेक्शन आपके सहायक को नई क्षमताएं देता है।',
+  'walkthrough.steps.messagingApps.title': 'जहां आप पहले से हैं वहीं चैट करें',
+  'walkthrough.steps.messagingApps.content':
+    'WhatsApp, Telegram, Slack, Discord जोड़ें ताकि आपका सहायक आपको कहीं भी पहुंच सके।',
+  'walkthrough.steps.settings.title': 'इसे अपना बनाएं',
+  'walkthrough.steps.settings.content':
+    'पसंद, गोपनीयता और सूचनाएं यहां हैं। आप इस पेज से यह टूर कभी भी फिर शुरू कर सकते हैं।',
+  'walkthrough.steps.chatTab.title': 'चैट पर वापस जाएं',
+  'walkthrough.steps.chatTab.content': 'जब भी बातचीत पर लौटना हो, Chat टैब का उपयोग करें।',
+  'walkthrough.steps.humanTab.title': 'अपनी Human प्रोफ़ाइल देखें',
+  'walkthrough.steps.humanTab.content':
+    'Human आपका निजी संदर्भ, पहचान और सहायक को दिखने वाली प्रोफ़ाइल एक साथ रखता है।',
+  'walkthrough.steps.brainTab.title': 'अपना Brain खोलें',
+  'walkthrough.steps.brainTab.content':
+    'Brain मेमोरी ग्राफ है: यहां देखें कि OpenHuman क्या जानता है और विचार कैसे जुड़े हैं।',
+  'walkthrough.steps.agentWorldTab.title': 'Agent World देखें',
+  'walkthrough.steps.agentWorldTab.content':
+    'Agent World में पुन: उपयोग योग्य एजेंट और साझा ऑटोमेशन रहते हैं।',
+  'walkthrough.steps.connectionsTab.title': 'कनेक्शन प्रबंधित करें',
+  'walkthrough.steps.connectionsTab.content':
+    'सेवाएं जोड़ने या बदलने के लिए Connections हमेशा मुख्य नेविगेशन में उपलब्ध है।',
+  'walkthrough.steps.feedbackTab.title': 'फ़ीडबैक भेजें',
+  'walkthrough.steps.feedbackTab.content':
+    'Feedback समस्याएं बताने या सुधार मांगने की सीधी जगह है।',
+  'walkthrough.steps.allSet.title': 'सब तैयार है!',
+  'walkthrough.steps.allSet.content':
+    'आपके सहायक ने स्वागत नोट छोड़ा है: यहां आप चैट कर सकते हैं, सवाल पूछ सकते हैं या विचार कर सकते हैं। आनंद लें!',
   'walkthrough.tooltip.letsGo': 'चलिए शुरू करें!',
   'walkthrough.tooltip.next': 'अगला →',
   'walkthrough.tooltip.skip': 'टूर छोड़ें',

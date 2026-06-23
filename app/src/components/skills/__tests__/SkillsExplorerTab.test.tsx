@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { CatalogEntry } from '../../../services/api/skillRegistryApi';
@@ -307,16 +307,69 @@ describe('SkillsExplorerTab', () => {
     const { skillRegistryApi } = await import(
       '../../../services/api/skillRegistryApi'
     );
-    const installedSkill = { ...MOCK_SKILL, id: 'registry-skill-1' };
+    const catalogEntry = {
+      ...MOCK_CATALOG_ENTRY,
+      id: 'built-in/apple-notes',
+      name: 'Apple Notes',
+      docs_path: 'skills/apple-notes/SKILL.md',
+    };
+    const installedSkill = {
+      ...MOCK_SKILL,
+      id: 'apple-notes',
+      name: 'Apple Notes',
+      location: '/Users/test/.openhuman/skills/apple-notes/SKILL.md',
+    };
     vi.mocked(workflowsApi.listWorkflows).mockResolvedValue([installedSkill]);
-    vi.mocked(skillRegistryApi.browse).mockResolvedValue([MOCK_CATALOG_ENTRY]);
+    vi.mocked(skillRegistryApi.browse).mockResolvedValue([catalogEntry]);
 
     render(<SkillsExplorerTab />);
 
     await waitFor(() => {
-      expect(screen.getByText('Registry Skill')).toBeInTheDocument();
+      expect(screen.getByText('Apple Notes')).toBeInTheDocument();
     });
-    expect(screen.getByTestId('registry-tile-registry-skill-1')).toBeInTheDocument();
+    const tile = screen.getByTestId('registry-tile-built-in/apple-notes');
+    expect(within(tile).getByText('Installed')).toBeInTheDocument();
+    expect(
+      within(tile).queryByTestId('registry-install-built-in/apple-notes')
+    ).not.toBeInTheDocument();
+
+    await act(async () => {
+      fireEvent.click(tile);
+    });
+
+    await waitFor(() => {
+      expect(screen.getAllByText('Apple Notes').length).toBeGreaterThan(1);
+    });
+    expect(screen.queryByRole('button', { name: 'Install' })).not.toBeInTheDocument();
+  });
+
+  it('does not mark catalog entries installed by display name alone', async () => {
+    const { workflowsApi } = await import('../../../services/api/workflowsApi');
+    const { skillRegistryApi } = await import(
+      '../../../services/api/skillRegistryApi'
+    );
+    const catalogEntry = {
+      ...MOCK_CATALOG_ENTRY,
+      id: 'built-in/apple-notes',
+      name: 'Apple Notes',
+      docs_path: 'skills/apple-notes/SKILL.md',
+    };
+    const unrelatedInstalledSkill = {
+      ...MOCK_SKILL,
+      id: 'apple-notes-copy',
+      name: 'Apple Notes',
+      location: '/Users/test/.openhuman/skills/apple-notes-copy/SKILL.md',
+    };
+    vi.mocked(workflowsApi.listWorkflows).mockResolvedValue([unrelatedInstalledSkill]);
+    vi.mocked(skillRegistryApi.browse).mockResolvedValue([catalogEntry]);
+
+    render(<SkillsExplorerTab />);
+
+    const tile = await screen.findByTestId('registry-tile-built-in/apple-notes');
+    expect(within(tile).queryByText('Installed')).not.toBeInTheDocument();
+    expect(
+      within(tile).getByTestId('registry-install-built-in/apple-notes')
+    ).toBeInTheDocument();
   });
 
   it('has an install from URL button', async () => {

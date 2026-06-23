@@ -16,6 +16,58 @@ const log = debug('skills:explorer-tab');
 const CATALOG_PAGE_SIZE = 60;
 const SEARCH_DEBOUNCE_MS = 300;
 
+function slugifyInstallKey(value: string | null | undefined): string | null {
+  const raw = value?.trim();
+  if (!raw) return null;
+
+  let out = '';
+  let lastDash = false;
+  for (const ch of raw) {
+    if (/[a-z0-9]/i.test(ch)) {
+      out += ch.toLowerCase();
+      lastDash = false;
+    } else if (!lastDash && out.length > 0) {
+      out += '-';
+      lastDash = true;
+    }
+  }
+  return out.replace(/-+$/, '') || null;
+}
+
+function lastPathSegment(value: string | null | undefined): string | null {
+  const raw = value?.trim();
+  if (!raw) return null;
+  const parts = raw.split(/[/:#?]+/).filter(Boolean);
+  return parts.at(-1) ?? null;
+}
+
+function parentPathSegment(value: string | null | undefined): string | null {
+  const raw = value?.trim();
+  if (!raw) return null;
+  const parts = raw.split(/[\\/]+/).filter(Boolean);
+  return parts.length >= 2 ? parts.at(-2) ?? null : null;
+}
+
+function catalogInstallKeys(entry: CatalogEntry): string[] {
+  return [
+    slugifyInstallKey(entry.id),
+    slugifyInstallKey(lastPathSegment(entry.id)),
+    slugifyInstallKey(parentPathSegment(entry.docs_path)),
+    slugifyInstallKey(parentPathSegment(entry.download_url)),
+  ].filter((key): key is string => Boolean(key));
+}
+
+function workflowInstallKeys(skill: WorkflowSummary): string[] {
+  return [
+    slugifyInstallKey(skill.id),
+    slugifyInstallKey(parentPathSegment(skill.location)),
+  ].filter((key): key is string => Boolean(key));
+}
+
+function isCatalogEntryInstalled(entry: CatalogEntry, installedKeys: Set<string>): boolean {
+  return catalogInstallKeys(entry).some(key => installedKeys.has(key));
+}
+
 function SourceBadge({ source }: { source: string }) {
   const SOURCE_COLORS: Record<string, string> = {
     'built-in':
@@ -577,7 +629,10 @@ export default function SkillsExplorerTab({ onToast }: SkillsExplorerTabProps) {
     }
   }, [view, debouncedQuery, activeSourceFilter, fetchCatalog]);
 
-  const installedIds = useMemo(() => new Set(skills.map(s => s.id)), [skills]);
+  const installedKeys = useMemo(
+    () => new Set(skills.flatMap(skill => workflowInstallKeys(skill))),
+    [skills]
+  );
 
   const filteredSkills = useMemo(() => {
     const q = searchQuery.toLowerCase().trim();
@@ -902,7 +957,7 @@ export default function SkillsExplorerTab({ onToast }: SkillsExplorerTabProps) {
                   <CatalogTile
                     key={`${entry.source}-${entry.id}`}
                     entry={entry}
-                    installed={installedIds.has(entry.id)}
+                    installed={isCatalogEntryInstalled(entry, installedKeys)}
                     installing={installingId === entry.id}
                     onClick={() => setDetailEntry(entry)}
                     onInstall={() => void handleRegistryInstall(entry)}
@@ -941,13 +996,13 @@ export default function SkillsExplorerTab({ onToast }: SkillsExplorerTabProps) {
         <SkillDetailDialog
           entry={detailEntry}
           skill={detailSkill}
-          installed={detailEntry ? installedIds.has(detailEntry.id) : true}
+          installed={detailEntry ? isCatalogEntryInstalled(detailEntry, installedKeys) : true}
           onClose={() => {
             setDetailEntry(null);
             setDetailSkill(null);
           }}
           onInstall={
-            detailEntry && !installedIds.has(detailEntry.id)
+            detailEntry && !isCatalogEntryInstalled(detailEntry, installedKeys)
               ? () => {
                   void handleRegistryInstall(detailEntry);
                   setDetailEntry(null);

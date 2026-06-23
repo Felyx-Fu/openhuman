@@ -2,19 +2,22 @@ use super::*;
 use tempfile::tempdir;
 
 #[tokio::test]
-async fn reset_local_data_removes_current_dir_default_dir_and_marker() {
+async fn reset_local_data_removes_active_user_and_markers_only() {
     let temp = tempdir().unwrap();
     let default_openhuman_dir = temp.path().join("default-openhuman");
-    let current_openhuman_dir = temp.path().join("custom-openhuman");
-    let marker = active_workspace_marker_path(&default_openhuman_dir);
+    // Active user lives under the shared root's `users/` tree, mirroring the
+    // real layout (`~/.openhuman/users/<id>`).
+    let current_openhuman_dir = default_openhuman_dir.join("users").join("active-user");
+    let workspace_marker = active_workspace_marker_path(&default_openhuman_dir);
+    let user_marker = crate::openhuman::config::active_user_marker_path(&default_openhuman_dir);
 
-    tokio::fs::create_dir_all(default_openhuman_dir.join("workspace"))
-        .await
-        .unwrap();
     tokio::fs::create_dir_all(current_openhuman_dir.join("workspace"))
         .await
         .unwrap();
-    tokio::fs::write(&marker, "config_dir = '/tmp/custom-openhuman'\n")
+    tokio::fs::write(&workspace_marker, "config_dir = 'users/active-user'\n")
+        .await
+        .unwrap();
+    tokio::fs::write(&user_marker, "user_id = 'active-user'\n")
         .await
         .unwrap();
 
@@ -22,13 +25,66 @@ async fn reset_local_data_removes_current_dir_default_dir_and_marker() {
         .await
         .unwrap();
 
+    // Active user's slice and both shared markers are gone …
     assert!(!current_openhuman_dir.exists());
-    assert!(!default_openhuman_dir.exists());
+    assert!(!workspace_marker.exists());
+    assert!(!user_marker.exists());
+    // … but the shared root itself survives.
+    assert!(default_openhuman_dir.exists());
     assert!(outcome
         .value
         .get("removed_paths")
         .and_then(|value| value.as_array())
         .is_some_and(|paths| !paths.is_empty()));
+}
+
+#[tokio::test]
+async fn reset_local_data_preserves_sibling_users() {
+    let temp = tempdir().unwrap();
+    let default_openhuman_dir = temp.path().join("default-openhuman");
+    let current_openhuman_dir = default_openhuman_dir.join("users").join("active-user");
+    let sibling_user_dir = default_openhuman_dir.join("users").join("other-user");
+    let sibling_file = sibling_user_dir.join("config.toml");
+
+    tokio::fs::create_dir_all(current_openhuman_dir.join("workspace"))
+        .await
+        .unwrap();
+    tokio::fs::create_dir_all(&sibling_user_dir).await.unwrap();
+    tokio::fs::write(&sibling_file, "api_key = 'sibling'\n")
+        .await
+        .unwrap();
+
+    reset_local_data_for_paths(&current_openhuman_dir, &default_openhuman_dir)
+        .await
+        .unwrap();
+
+    // The active user is wiped; the sibling account is untouched — this is the
+    // regression this fix addresses.
+    assert!(!current_openhuman_dir.exists());
+    assert!(sibling_user_dir.exists());
+    assert!(sibling_file.exists());
+}
+
+#[tokio::test]
+async fn reset_local_data_tolerates_absent_paths() {
+    let temp = tempdir().unwrap();
+    let default_openhuman_dir = temp.path().join("default-openhuman");
+    let current_openhuman_dir = default_openhuman_dir.join("users").join("active-user");
+    tokio::fs::create_dir_all(&default_openhuman_dir)
+        .await
+        .unwrap();
+
+    // No current user dir, no markers — a fresh / already-cleared install.
+    let outcome = reset_local_data_for_paths(&current_openhuman_dir, &default_openhuman_dir)
+        .await
+        .unwrap();
+
+    assert!(default_openhuman_dir.exists());
+    assert!(outcome
+        .value
+        .get("removed_paths")
+        .and_then(|value| value.as_array())
+        .is_some_and(|paths| paths.is_empty()));
 }
 
 // ── env_flag_enabled ────────────────────────────────────────────
@@ -938,6 +994,7 @@ async fn apply_local_ai_settings_updates_lm_studio_provider_fields() {
         usage_heartbeat: Some(true),
         usage_learning_reflection: Some(false),
         usage_subconscious: Some(true),
+        api_key: None,
     };
 
     let outcome = apply_local_ai_settings(&mut cfg, patch)
@@ -1008,6 +1065,66 @@ async fn apply_local_ai_settings_normalizes_ollama_unspecified_host_and_allows_n
     .expect("clear ollama base url");
 
     assert!(cfg.local_ai.base_url.is_none());
+}
+
+#[tokio::test]
+async fn apply_local_ai_settings_persists_api_key() {
+    let tmp = tempdir().unwrap();
+    let mut cfg = tmp_config(&tmp);
+    cfg.local_ai.api_key = None;
+
+    // Non-empty key is stored.
+    let patch = LocalAiSettingsPatch {
+        runtime_enabled: Some(true),
+        opt_in_confirmed: Some(true),
+        provider: Some("omlx".into()),
+        base_url: Some(Some("http://localhost:8080/v1".into())),
+        api_key: Some("sk-omlx-1".into()),
+        ..LocalAiSettingsPatch::default()
+    };
+    apply_local_ai_settings(&mut cfg, patch)
+        .await
+        .expect("apply omlx api key");
+    assert_eq!(cfg.local_ai.api_key.as_deref(), Some("sk-omlx-1"));
+
+    // Whitespace-only key clears to None.
+    let patch_clear = LocalAiSettingsPatch {
+        api_key: Some("   ".into()),
+        ..LocalAiSettingsPatch::default()
+    };
+    apply_local_ai_settings(&mut cfg, patch_clear)
+        .await
+        .expect("clear api key");
+    assert!(cfg.local_ai.api_key.is_none());
+}
+
+#[tokio::test]
+async fn apply_local_ai_settings_omlx_keeps_provider_and_v1_suffix() {
+    // Regression: omlx must NOT collapse to ollama (normalize_provider) and its
+    // `/v1` suffix must survive (no validate_ollama_url path-strip).
+    let tmp = tempdir().unwrap();
+    let mut cfg = tmp_config(&tmp);
+
+    apply_local_ai_settings(
+        &mut cfg,
+        LocalAiSettingsPatch {
+            runtime_enabled: Some(true),
+            opt_in_confirmed: Some(true),
+            provider: Some("omlx".into()),
+            base_url: Some(Some("http://localhost:8000/v1".into())),
+            api_key: Some("sk-omlx-1".into()),
+            ..LocalAiSettingsPatch::default()
+        },
+    )
+    .await
+    .expect("apply omlx");
+
+    assert_eq!(cfg.local_ai.provider, "omlx");
+    assert_eq!(
+        cfg.local_ai.base_url.as_deref(),
+        Some("http://localhost:8000/v1")
+    );
+    assert_eq!(cfg.local_ai.api_key.as_deref(), Some("sk-omlx-1"));
 }
 
 #[tokio::test]

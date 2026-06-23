@@ -8,6 +8,7 @@
 import { useCallback, useEffect, useState } from 'react';
 
 import { useT } from '../../../lib/i18n/I18nContext';
+import { useCoreState } from '../../../providers/CoreStateProvider';
 import {
   clearEmbeddingsApiKey,
   type EmbeddingProviderEntry,
@@ -18,6 +19,7 @@ import {
   testEmbeddingsConnection,
   updateEmbeddingsSettings,
 } from '../../../services/api/embeddingsApi';
+import { isLocalSessionToken } from '../../../utils/localSession';
 import PanelPage from '../../layout/PanelPage';
 import Button from '../../ui/Button';
 import SettingsBackButton from '../components/SettingsBackButton';
@@ -38,6 +40,16 @@ type Status =
   | { kind: 'saved' }
   | { kind: 'error'; message: string };
 
+function isBackendSessionError(message: string | undefined): boolean {
+  const text = message ?? '';
+  return (
+    /no backend session/i.test(text) ||
+    /SESSION_EXPIRED/i.test(text) ||
+    /session expired/i.test(text) ||
+    (/invalid token/i.test(text) && /(401|unauthorized)/i.test(text))
+  );
+}
+
 interface EmbeddingsPanelProps {
   embedded?: boolean;
 }
@@ -45,9 +57,12 @@ interface EmbeddingsPanelProps {
 const EmbeddingsPanel = ({ embedded = false }: EmbeddingsPanelProps = {}) => {
   const { t } = useT();
   const { navigateBack } = useSettingsNavigation();
+  const { snapshot, clearSession } = useCoreState();
+  const isLocalSession = isLocalSessionToken(snapshot.sessionToken);
 
   const [settings, setSettings] = useState<EmbeddingsSettings | null>(null);
   const [status, setStatus] = useState<Status>({ kind: 'loading' });
+  const [managedSessionMissing, setManagedSessionMissing] = useState(false);
 
   // Setup popup state
   const [setupProvider, setSetupProvider] = useState<EmbeddingProviderEntry | null>(null);
@@ -110,9 +125,21 @@ const EmbeddingsPanel = ({ embedded = false }: EmbeddingsPanelProps = {}) => {
   const currentModels = currentEntry?.models ?? [];
   const currentModel = currentModels.find(m => m.id === settings.model) ?? currentModels[0];
   const allowedDims = currentModel?.allowed_dimensions ?? [];
+  const managedLoginMessage = t('settings.embeddings.managedLoginRequired');
+  const managedRequiresLogin = isLocalSession && selectedProvider === 'managed';
+  const showManagedLoginPrompt =
+    (selectedProvider === 'managed' && (managedRequiresLogin || managedSessionMissing)) ||
+    (isLocalSession && managedSessionMissing);
 
   function handleProviderClick(entry: EmbeddingProviderEntry) {
+    if (entry.slug !== 'managed') setManagedSessionMissing(false);
     if (entry.slug === selectedProvider) return;
+
+    if (entry.slug === 'managed' && isLocalSession) {
+      setManagedSessionMissing(true);
+      setStatus({ kind: 'error', message: managedLoginMessage });
+      return;
+    }
 
     if (entry.slug === 'custom') {
       // For custom, open setup popup to enter endpoint
@@ -143,6 +170,7 @@ const EmbeddingsPanel = ({ embedded = false }: EmbeddingsPanelProps = {}) => {
     const newModel = model ?? defaultModel?.id ?? settings!.model;
     const newDims = dims ?? defaultModel?.default_dimensions ?? settings!.dimensions;
 
+    if (slug !== 'managed') setManagedSessionMissing(false);
     setStatus({ kind: 'saving' });
     try {
       const result = await updateEmbeddingsSettings({
@@ -338,12 +366,25 @@ const EmbeddingsPanel = ({ embedded = false }: EmbeddingsPanelProps = {}) => {
     try {
       const result = await testEmbeddingsConnection();
       if (result.success) {
+        setManagedSessionMissing(false);
         setStatus({ kind: 'saved' });
       } else {
-        setStatus({ kind: 'error', message: result.error ?? 'Test failed' });
+        const message = result.error ?? t('settings.embeddings.connectionTestFailed');
+        if (selectedProvider === 'managed' && isBackendSessionError(message)) {
+          setManagedSessionMissing(true);
+          setStatus({ kind: 'error', message: managedLoginMessage });
+        } else {
+          setStatus({ kind: 'error', message });
+        }
       }
     } catch (err) {
-      setStatus({ kind: 'error', message: err instanceof Error ? err.message : String(err) });
+      const message = err instanceof Error ? err.message : String(err);
+      if (selectedProvider === 'managed' && isBackendSessionError(message)) {
+        setManagedSessionMissing(true);
+        setStatus({ kind: 'error', message: managedLoginMessage });
+      } else {
+        setStatus({ kind: 'error', message });
+      }
     }
   }
 
@@ -389,6 +430,11 @@ const EmbeddingsPanel = ({ embedded = false }: EmbeddingsPanelProps = {}) => {
                             : t('settings.embeddings.statusNeedsKey')}
                         </SettingsBadge>
                       )}
+                      {isLocalSession && entry.slug === 'managed' && (
+                        <SettingsBadge variant="warning">
+                          {t('settings.embeddings.requiresSignIn')}
+                        </SettingsBadge>
+                      )}
                     </span>
                     <span className="block mt-0.5 text-xs text-neutral-500 dark:text-neutral-400">
                       {entry.description}
@@ -414,6 +460,29 @@ const EmbeddingsPanel = ({ embedded = false }: EmbeddingsPanelProps = {}) => {
             })}
           </div>
         </SettingsSection>
+
+        {showManagedLoginPrompt && (
+          <div className="rounded-xl border border-amber-200 dark:border-amber-500/30 bg-amber-50 dark:bg-amber-900/10 p-3">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+              <p className="text-xs text-amber-800 dark:text-amber-200 leading-relaxed">
+                {t('settings.embeddings.managedBannerIntro')}{' '}
+                {isLocalSession
+                  ? t('settings.embeddings.managedBannerLocalSession')
+                  : t('settings.embeddings.managedBannerRemoteSession')}
+              </p>
+              <Button
+                type="button"
+                variant="secondary"
+                size="xs"
+                className="shrink-0"
+                onClick={() => void clearSession()}>
+                {isLocalSession
+                  ? t('settings.exitLocalSession')
+                  : t('settings.embeddings.signInAgain')}
+              </Button>
+            </div>
+          </div>
+        )}
 
         {/* Vector search disabled notice */}
         {selectedProvider === 'none' && (
@@ -487,7 +556,7 @@ const EmbeddingsPanel = ({ embedded = false }: EmbeddingsPanelProps = {}) => {
                   variant="secondary"
                   size="xs"
                   onClick={() => void handleTestConnection()}
-                  disabled={selectedProvider === 'none'}>
+                  disabled={selectedProvider === 'none' || managedRequiresLogin}>
                   {t('settings.embeddings.testConnection')}
                 </Button>
               </div>

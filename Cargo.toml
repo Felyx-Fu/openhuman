@@ -1,6 +1,6 @@
 [package]
 name = "openhuman"
-version = "0.57.52"
+version = "0.57.53"
 edition = "2021"
 description = "OpenHuman core business logic and RPC server"
 autobins = false
@@ -24,6 +24,10 @@ path = "src/bin/memory_tree_init_smoke.rs"
 [[bin]]
 name = "inference-probe"
 path = "src/bin/inference_probe.rs"
+
+[[bin]]
+name = "harness-subagent-audit"
+path = "src/bin/harness_subagent_audit.rs"
 
 [[bin]]
 name = "test-mcp-stub"
