@@ -135,6 +135,9 @@ impl Tool for WaitSubagentTool {
             timeout_secs
         );
 
+        let resume_ref =
+            running_subagents::resume_ref_for_task(&resolved_task_id, &parent_session).ok();
+
         match running_subagents::wait(
             &resolved_task_id,
             &parent_session,
@@ -158,10 +161,29 @@ impl Tool for WaitSubagentTool {
                     resolved_task_id,
                     question.chars().count()
                 );
-                Ok(ToolResult::success(format!(
+                let mut message = format!(
                     "Sub-agent paused for clarification and did not finish: {question}\n\n\
                      It cannot proceed unattended. Resume it with continue_subagent once you have an answer."
-                )))
+                );
+                if let Some(reference) = resume_ref {
+                    message.push_str("\n\n[subagent_resume_ref]\n");
+                    message.push_str(
+                        &serde_json::to_string(&serde_json::json!({
+                            "task_id": reference.task_id,
+                            "agent_id": reference.agent_id,
+                            "subagent_session_id": reference.subagent_session_id,
+                            "tool": "continue_subagent"
+                        }))
+                        .unwrap_or_else(|_| "{}".to_string()),
+                    );
+                    message.push_str("\n[/subagent_resume_ref]");
+                } else {
+                    log::debug!(
+                        "[wait_subagent] resume_ref_unavailable task_id={}",
+                        resolved_task_id
+                    );
+                }
+                Ok(ToolResult::success(message))
             }
             Ok(WaitOutcome::Terminal(SubagentStatus::Failed { error })) => {
                 log::debug!(
