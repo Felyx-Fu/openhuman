@@ -245,7 +245,9 @@ test.describe('Harness - Composio tool-call prompt flow', () => {
 
     await sendMessage(page, 'check my email inbox please');
     await expect(page.getByText(CANARY).first()).toBeVisible({ timeout: 60_000 });
-    await expect(page.getByText(/unable to fetch your emails/i)).toBeVisible();
+    await expect(
+      page.getByTestId('agent-message-text').filter({ hasText: /unable to fetch your emails/i })
+    ).toBeVisible();
   });
 
   test('linear create issue flow confirms creation in the final reply', async ({ page }) => {
