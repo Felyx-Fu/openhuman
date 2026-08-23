@@ -334,7 +334,7 @@ mod tests {
     #[test]
     fn missing_workspace_block_suggests_workspace_repair_not_more_autonomy() {
         let raw = format!(
-            "{POLICY_BLOCKED_MARKER} {WORKSPACE_MISSING_MARKER} C:\\workspace. Nothing can be written until it is created; this is not a path-traversal refusal."
+            "{POLICY_BLOCKED_MARKER} {WORKSPACE_MISSING_MARKER} Workspace directory does not exist: C:\\workspace. Nothing can be written until it is created; this is not a path-traversal refusal."
         );
         let msg = PolicyDenial::SecurityPolicyBlocked {
             tool: "write_file",
