@@ -18,6 +18,12 @@ use tokio::sync::OnceCell;
 /// `Error: …` wrapping the tool layer adds and is easy to grep in logs.
 pub const POLICY_BLOCKED_MARKER: &str = "[policy-blocked]";
 
+/// Stable marker for a fail-closed write refusal caused by a missing workspace
+/// directory. This remains distinct from a resolved path escaping the
+/// workspace so callers can give the user an accurate, actionable diagnosis
+/// without weakening the path boundary.
+pub const WORKSPACE_MISSING_MARKER: &str = "Workspace directory does not exist:";
+
 /// Stable marker prefixing a **this-turn denial** — the user answered "no" to
 /// an approval prompt, or the prompt timed out / its channel dropped. Unlike a
 /// block this isn't permanent across turns, but re-issuing the *same* call this

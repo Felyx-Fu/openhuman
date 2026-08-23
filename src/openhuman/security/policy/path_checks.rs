@@ -1,6 +1,8 @@
 use std::path::{Path, PathBuf};
 
-use super::types::{SecurityPolicy, TrustedAccess, POLICY_BLOCKED_MARKER};
+use super::types::{
+    SecurityPolicy, TrustedAccess, POLICY_BLOCKED_MARKER, WORKSPACE_MISSING_MARKER,
+};
 use super::types::{WORKSPACE_INTERNAL_DIRS, WORKSPACE_INTERNAL_FILES};
 
 impl SecurityPolicy {
@@ -270,6 +272,21 @@ impl SecurityPolicy {
         } else {
             self.action_dir.join(&expanded)
         };
+
+        // A missing workspace is a configuration/startup condition, not a
+        // path-traversal attempt. Keep the write boundary fail-closed, while
+        // preserving explicitly granted read-write trusted roots that do not
+        // depend on the workspace directory.
+        if self.workspace_only
+            && !self.workspace_dir.is_dir()
+            && !self.is_within_trusted_root(&full_path, true)
+        {
+            return Err(format!(
+                "{POLICY_BLOCKED_MARKER} {WORKSPACE_MISSING_MARKER} {}. Nothing can be written until it is created; this is not a path-traversal refusal.",
+                self.workspace_dir.display()
+            ));
+        }
+
         let parent = full_path
             .parent()
             .ok_or_else(|| format!("Invalid path (no parent): {path}"))?;

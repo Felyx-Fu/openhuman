@@ -19,7 +19,7 @@
 //! It is a mitigation, not a guarantee — detecting fabrication needs the
 //! tool-call record carried out to the caller.
 
-use crate::openhuman::security::POLICY_BLOCKED_MARKER;
+use crate::openhuman::security::{POLICY_BLOCKED_MARKER, WORKSPACE_MISSING_MARKER};
 use crate::openhuman::tools::PermissionLevel;
 
 /// Generic workaround for a raw security-policy / autonomy block. These denials
@@ -32,6 +32,11 @@ const SECURITY_POLICY_WORKAROUND: &str = "Raise the agent's access tier / autono
     `[autonomy]` config) if this action should be allowed; otherwise reach the goal \
     with a permitted (e.g. read-only) alternative, or report that it can't be done \
     here.";
+
+/// A missing workspace cannot be repaired by changing the agent's autonomy.
+/// Keep this separate from [`SECURITY_POLICY_WORKAROUND`] so the denial does
+/// not send the user toward an unrelated permission change.
+const WORKSPACE_MISSING_WORKAROUND: &str = "Create the workspace directory (or configure a valid workspace path) and retry; raising the agent's access tier / autonomy cannot resolve a missing workspace.";
 
 /// The boundary that blocked a tool call, with the context needed to explain it
 /// and suggest a way forward.
@@ -99,12 +104,17 @@ impl PolicyDenial<'_> {
                     .unwrap_or(raw_reason)
                     .trim()
                     .to_string();
+                let workaround = if raw_reason.contains(WORKSPACE_MISSING_MARKER) {
+                    WORKSPACE_MISSING_WORKAROUND
+                } else {
+                    SECURITY_POLICY_WORKAROUND
+                };
                 (
                     format!(
                         "{POLICY_BLOCKED_MARKER} Tool '{tool}' was blocked by the security policy"
                     ),
                     reason,
-                    SECURITY_POLICY_WORKAROUND.to_string(),
+                    workaround.to_string(),
                 )
             }
             PolicyDenial::SessionForbidden {
@@ -311,6 +321,24 @@ mod tests {
         assert!(msg.contains("read-only mode — only read commands are allowed"));
         assert!(msg.contains("Workaround:"));
         assert!(msg.contains("agent-access tier / autonomy") || msg.contains("Agent access"));
+        assert!(msg.contains("Relay this to the user"));
+    }
+
+    #[test]
+    fn missing_workspace_block_suggests_workspace_repair_not_more_autonomy() {
+        let raw = format!(
+            "{POLICY_BLOCKED_MARKER} {WORKSPACE_MISSING_MARKER} C:\\workspace. Nothing can be written until it is created; this is not a path-traversal refusal."
+        );
+        let msg = PolicyDenial::SecurityPolicyBlocked {
+            tool: "write_file",
+            raw_reason: &raw,
+        }
+        .render();
+
+        assert!(msg.contains(WORKSPACE_MISSING_MARKER));
+        assert!(msg.contains("Create the workspace directory"));
+        assert!(msg.contains("cannot resolve a missing workspace"));
+        assert!(!msg.contains("Raise the agent's access tier / autonomy"));
         assert!(msg.contains("Relay this to the user"));
     }
 

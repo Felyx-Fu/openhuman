@@ -2140,6 +2140,59 @@ async fn validate_parent_path_allows_new_file() {
     assert!(result.is_ok());
 }
 
+#[tokio::test]
+async fn validate_parent_path_distinguishes_missing_workspace() {
+    let parent = tempfile::tempdir().unwrap();
+    let workspace = parent.path().join("missing-workspace");
+    let policy = SecurityPolicy {
+        workspace_dir: workspace.clone(),
+        action_dir: workspace,
+        workspace_only: true,
+        forbidden_paths: vec![],
+        ..SecurityPolicy::default()
+    };
+
+    let err = policy
+        .validate_parent_path("newfile.txt")
+        .await
+        .expect_err("a missing workspace must fail closed");
+    assert!(err.contains(POLICY_BLOCKED_MARKER), "err: {err}");
+    assert!(err.contains(WORKSPACE_MISSING_MARKER), "err: {err}");
+    assert!(
+        err.contains("Nothing can be written until it is created"),
+        "err: {err}"
+    );
+    assert!(
+        !err.contains("Resolved parent path escapes workspace"),
+        "missing workspace must not be mislabeled as traversal: {err}"
+    );
+}
+
+#[tokio::test]
+async fn validate_parent_path_preserves_trusted_write_when_workspace_missing() {
+    let parent = tempfile::tempdir().unwrap();
+    let workspace = parent.path().join("missing-workspace");
+    let trusted = parent.path().join("trusted");
+    std::fs::create_dir_all(&trusted).unwrap();
+    let policy = SecurityPolicy {
+        workspace_dir: workspace,
+        action_dir: trusted.clone(),
+        workspace_only: true,
+        forbidden_paths: vec![],
+        trusted_roots: vec![TrustedRoot {
+            path: trusted.to_string_lossy().into_owned(),
+            access: TrustedAccess::ReadWrite,
+        }],
+        ..SecurityPolicy::default()
+    };
+
+    let resolved = policy
+        .validate_parent_path("newfile.txt")
+        .await
+        .expect("an explicitly granted trusted root must remain writable");
+    assert!(resolved.ends_with("newfile.txt"));
+}
+
 #[cfg(unix)]
 #[tokio::test]
 async fn validate_parent_path_blocks_symlinked_parent_dir() {
