@@ -98,17 +98,20 @@ impl PolicyDenial<'_> {
                 // Strip the marker prefix from the reason (it is re-added on the
                 // `blocked` line so downstream `contains(POLICY_BLOCKED_MARKER)`
                 // checks — classification, the loop-breaker — keep matching).
-                let reason = raw_reason
+                let policy_reason = raw_reason
                     .trim()
                     .strip_prefix(POLICY_BLOCKED_MARKER)
                     .unwrap_or(raw_reason)
                     .trim();
-                let reason = reason
+                let is_missing_workspace = policy_reason
                     .strip_prefix(WORKSPACE_MISSING_MARKER)
-                    .unwrap_or(reason)
+                    .is_some();
+                let reason = policy_reason
+                    .strip_prefix(WORKSPACE_MISSING_MARKER)
+                    .unwrap_or(policy_reason)
                     .trim()
                     .to_string();
-                let workaround = if raw_reason.contains(WORKSPACE_MISSING_MARKER) {
+                let workaround = if is_missing_workspace {
                     WORKSPACE_MISSING_WORKAROUND
                 } else {
                     SECURITY_POLICY_WORKAROUND
@@ -345,6 +348,21 @@ mod tests {
         assert!(msg.contains("cannot resolve a missing workspace"));
         assert!(!msg.contains("Raise the agent's access tier / autonomy"));
         assert!(msg.contains("Relay this to the user"));
+    }
+
+    #[test]
+    fn workspace_marker_only_classifies_a_prefixed_reason() {
+        let raw = format!(
+            "{POLICY_BLOCKED_MARKER} unrelated failure mentions {WORKSPACE_MISSING_MARKER}"
+        );
+        let msg = PolicyDenial::SecurityPolicyBlocked {
+            tool: "write_file",
+            raw_reason: &raw,
+        }
+        .render();
+
+        assert!(msg.contains("Raise the agent's access tier / autonomy"));
+        assert!(!msg.contains("Create the workspace directory"));
     }
 
     #[test]
