@@ -282,7 +282,7 @@ impl SecurityPolicy {
             && !self.is_within_trusted_root(&full_path, true)
         {
             return Err(format!(
-                "{POLICY_BLOCKED_MARKER} {WORKSPACE_MISSING_MARKER} {}. Nothing can be written until it is created; this is not a path-traversal refusal.",
+                "{POLICY_BLOCKED_MARKER} {WORKSPACE_MISSING_MARKER} Workspace directory does not exist: {}. Nothing can be written until it is created; this is not a path-traversal refusal.",
                 self.workspace_dir.display()
             ));
         }

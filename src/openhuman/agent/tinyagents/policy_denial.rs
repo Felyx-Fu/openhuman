@@ -102,6 +102,10 @@ impl PolicyDenial<'_> {
                     .trim()
                     .strip_prefix(POLICY_BLOCKED_MARKER)
                     .unwrap_or(raw_reason)
+                    .trim();
+                let reason = reason
+                    .strip_prefix(WORKSPACE_MISSING_MARKER)
+                    .unwrap_or(reason)
                     .trim()
                     .to_string();
                 let workaround = if raw_reason.contains(WORKSPACE_MISSING_MARKER) {
@@ -335,7 +339,8 @@ mod tests {
         }
         .render();
 
-        assert!(msg.contains(WORKSPACE_MISSING_MARKER));
+        assert!(msg.contains("Workspace directory does not exist:"));
+        assert!(!msg.contains(WORKSPACE_MISSING_MARKER));
         assert!(msg.contains("Create the workspace directory"));
         assert!(msg.contains("cannot resolve a missing workspace"));
         assert!(!msg.contains("Raise the agent's access tier / autonomy"));
