@@ -4642,7 +4642,7 @@ const messages: TranslationMap = {
   'settings.ai.claudeCode.signIn': 'Se connecter avec Claude',
   'settings.ai.claudeCode.reconnect': 'Reconnecter',
   'settings.ai.claudeCode.loginHint':
-    'Ouvre un terminal exécutant claude auth login --claudeai. Une fois terminé, cliquez sur Revérifier.',
+    'Ouvrez un terminal exécutant claude auth login --claudeai. Une fois terminé, cliquez sur Revérifier.',
   'settings.ai.claudeCode.loginError':
     "Impossible d'ouvrir le terminal de connexion. Veuillez réessayer.",
   'settings.ai.claudeCode.fullAccess': 'Accès complet',
