@@ -9,8 +9,9 @@
 //!   into one user turn so claude has full context without starting a new
 //!   generation for each historical row (system message is conveyed via
 //!   `--append-system-prompt`, not stdin). Claude Code only accepts `user`
-//!   roles in this stream, so prior assistant responses are represented as
-//!   clearly labelled user text.
+//!   roles in this stream, so prior user turns and assistant responses are
+//!   represented as clearly labelled historical context, followed by an
+//!   explicitly labelled current user turn.
 //! - On a `--resume` of an existing CC session: claude already has prior
 //!   turns server-side; we only send the last user turn.
 
@@ -18,7 +19,9 @@ use serde_json::{json, Value};
 
 use crate::openhuman::agent::messages::ChatMessage;
 
+const PREVIOUS_USER_PREFIX: &str = "[Previous user message]\n";
 const PREVIOUS_ASSISTANT_PREFIX: &str = "[Previous assistant response]\n";
+const CURRENT_USER_PREFIX: &str = "[Current user message]\n";
 const HISTORY_SEPARATOR: &str = "\n\n";
 
 /// Build the bytes to write to claude's stdin. Returns an empty `Vec`
@@ -26,9 +29,21 @@ const HISTORY_SEPARATOR: &str = "\n\n";
 pub fn build_stdin(messages: &[ChatMessage], is_new_session: bool) -> Vec<u8> {
     let text = if is_new_session {
         let mut history: Option<String> = None;
-        for msg in messages.iter().filter(|m| m.role != "system") {
+        let current_user_index = messages.iter().rposition(|msg| msg.role == "user");
+        for (index, msg) in messages
+            .iter()
+            .enumerate()
+            .filter(|(_, msg)| msg.role != "system")
+        {
             let part = match msg.role.as_str() {
-                "user" => msg.content.clone(),
+                "user" => {
+                    let prefix = if Some(index) == current_user_index {
+                        CURRENT_USER_PREFIX
+                    } else {
+                        PREVIOUS_USER_PREFIX
+                    };
+                    format!("{prefix}{}", msg.content)
+                }
                 "assistant" => format!("{PREVIOUS_ASSISTANT_PREFIX}{}", msg.content),
                 // CC stdin doesn't accept `system` or `tool` rows. The system
                 // prompt is plumbed via `--append-system-prompt`; tool roles
@@ -105,7 +120,24 @@ mod tests {
         assert_eq!(event["message"]["role"], "user");
         assert_eq!(
             event["message"]["content"][0]["text"],
-            "hi\n\n[Previous assistant response]\nhello\n\nhow are you?"
+            "[Previous user message]\nhi\n\n[Previous assistant response]\nhello\n\n[Current user message]\nhow are you?"
+        );
+    }
+
+    #[test]
+    fn new_session_labels_replayed_user_turns_as_history() {
+        let history = vec![
+            msg("user", "edit file A"),
+            msg("assistant", "done"),
+            msg("user", "summarize the changes"),
+        ];
+        let bytes = build_stdin(&history, true);
+        let s = String::from_utf8(bytes).unwrap();
+        let event: Value = serde_json::from_str(s.lines().next().unwrap()).unwrap();
+
+        assert_eq!(
+            event["message"]["content"][0]["text"],
+            "[Previous user message]\nedit file A\n\n[Previous assistant response]\ndone\n\n[Current user message]\nsummarize the changes"
         );
     }
 
