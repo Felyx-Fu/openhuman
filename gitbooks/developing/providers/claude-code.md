@@ -7,7 +7,7 @@ OpenHuman can route any chat workload through **Anthropic's `claude` CLI** inste
 ## Requirements
 
 - Claude Code CLI **≥ 2.0.0** on `PATH` (or `OPENHUMAN_CLAUDE_CLI=/abs/path/to/claude`).
-- An Anthropic API key in `ANTHROPIC_API_KEY`, **or** a pre-existing `~/.claude/.credentials.json` from `claude login`.
+- An Anthropic API key in `ANTHROPIC_API_KEY`, **or** a pre-existing `~/.claude/.credentials.json` from `claude auth login --claudeai`.
 - The `openhuman-core` binary on disk: OpenHuman spawns `openhuman-core mcp` as a stdio MCP server so the CLI can call OpenHuman tools. The path is discovered via `std::env::current_exe()`.
 
 ## Routing a workload through the CLI
@@ -61,13 +61,13 @@ Each chat turn:
 4. Pipe stdin: full conversation history on a new session, just the last user turn on `--resume` (the CLI already holds its own prior-turn context server-side).
 5. Stream stdout through the JSONL parser → event mapper → `ProviderDelta`s on the request's `stream` sink.
 
-On exit non-zero the driver bubbles stderr (capped at 16 KiB) up as the error message.
+On non-zero exit the driver prefers the CLI's structured error event; if none is available, it falls back to sanitized stderr (capped at 16 KiB before final error formatting).
 
 ## Auth resolution order
 
 1. `ANTHROPIC_API_KEY` env var (highest precedence, set on the spawned child).
 2. Per-thread / per-agent key from `ChatRequest` config (future, not yet wired).
-3. `~/.claude/.credentials.json`: the CLI's own OAuth tokens from `claude login` (Pro / Max subscription). We never read or round-trip the access token; auth detection probes this file for non-secret metadata only.
+3. `~/.claude/.credentials.json`: the CLI's own OAuth tokens from `claude auth login --claudeai` (Pro / Max subscription). We never read or round-trip the access token; auth detection probes this file for non-secret metadata only.
 4. None: the CLI will fail with an auth error.
 
 The `openhuman.inference_claude_code_auth_status` RPC probes sources 1 and 3 without spawning the CLI and surfaces the result in the Settings → AI panel.

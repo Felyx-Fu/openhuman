@@ -3,7 +3,7 @@
 //! v1 resolution order:
 //!   1. Process env `ANTHROPIC_API_KEY` (highest precedence).
 //!   2. `~/.claude/.credentials.json` — only used if the CLI is already
-//!      logged in via `claude login`. We pass it through transparently by
+//!      logged in via `claude auth login --claudeai`. We pass it through transparently by
 //!      *not* setting `ANTHROPIC_API_KEY`; the CLI then reads its own
 //!      credentials file.
 //!

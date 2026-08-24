@@ -17,6 +17,7 @@ use tokio::sync::mpsc;
 /// Hard timeout per turn (PLAN §8). If the CLI hangs (network stall,
 /// infinite loop, MCP deadlock) we kill the child and surface a timeout.
 const TURN_TIMEOUT: Duration = Duration::from_secs(300);
+const STDERR_MAX_BYTES: usize = 16_384;
 
 use super::event_mapper::EventMapper;
 use super::input_builder::build_stdin;
@@ -24,6 +25,41 @@ use super::session_store::{generate_uuid_v4, is_uuid_v4, SessionStore};
 use super::stream_parser::StreamJsonParser;
 use crate::openhuman::agent::messages::ChatMessage;
 use crate::openhuman::inference::provider::types::{ChatResponse, ProviderDelta};
+
+/// Keep process diagnostics bounded without cutting a UTF-8 code point in
+/// half. The final user-facing message is additionally sanitized and capped
+/// by `sanitize_api_error`.
+fn truncate_to_bytes(input: &mut String, max_bytes: usize) {
+    if input.len() <= max_bytes {
+        return;
+    }
+
+    let end = input
+        .char_indices()
+        .map(|(index, _)| index)
+        .take_while(|index| *index <= max_bytes)
+        .last()
+        .unwrap_or(0);
+    input.truncate(end);
+}
+
+fn format_process_failure(
+    status_code: Option<i32>,
+    structured_error: Option<&str>,
+    stderr: &str,
+) -> String {
+    let (label, raw_detail) = structured_error
+        .filter(|error| !error.trim().is_empty())
+        .map(|error| ("error", error))
+        .or_else(|| (!stderr.trim().is_empty()).then_some(("stderr", stderr)))
+        .unwrap_or(("error", "no diagnostic output"));
+    let detail = crate::openhuman::inference::provider::sanitize_api_error(raw_detail.trim());
+
+    format!(
+        "[claude-code][driver] exit {:?} {label}={detail}",
+        status_code
+    )
+}
 
 /// Tools withheld in the DEFAULT (`acceptEdits`) posture: Claude Code can
 /// read/edit files in the project, but not run shell, hit the network, or
@@ -422,8 +458,8 @@ pub async fn run_turn(ctx: TurnContext<'_>) -> anyhow::Result<ChatResponse> {
                 break;
             }
             acc.push_str(&String::from_utf8_lossy(&tmp[..n]));
-            if acc.len() > 16_384 {
-                acc.truncate(16_384);
+            if acc.len() > STDERR_MAX_BYTES {
+                truncate_to_bytes(&mut acc, STDERR_MAX_BYTES);
             }
         }
         acc
@@ -484,13 +520,13 @@ pub async fn run_turn(ctx: TurnContext<'_>) -> anyhow::Result<ChatResponse> {
 
     if !status.success() {
         anyhow::bail!(
-            "[claude-code][driver] exit {:?} stderr={}",
-            status.code(),
-            stderr_text.trim()
+            "{}",
+            format_process_failure(status.code(), mapper.error.as_deref(), &stderr_text,)
         );
     }
     if let Some(err) = mapper.error.clone() {
-        anyhow::bail!("[claude-code][driver] {}", err);
+        let sanitized = crate::openhuman::inference::provider::sanitize_api_error(err.trim());
+        anyhow::bail!("[claude-code][driver] {}", sanitized);
     }
 
     Ok(mapper.into_response())
@@ -499,6 +535,39 @@ pub async fn run_turn(ctx: TurnContext<'_>) -> anyhow::Result<ChatResponse> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn nonzero_exit_prefers_sanitized_structured_error() {
+        let message = format_process_failure(
+            Some(2),
+            Some("structured failure sk-ant-structured-secret"),
+            "stderr fallback sk-ant-stderr-secret",
+        );
+
+        assert!(message.contains("error=structured failure"));
+        assert!(!message.contains("stderr fallback"));
+        assert!(!message.contains("sk-ant-structured-secret"));
+        assert!(!message.contains("sk-ant-stderr-secret"));
+        assert!(message.contains("[REDACTED]"));
+    }
+
+    #[test]
+    fn nonzero_exit_falls_back_to_sanitized_stderr() {
+        let message = format_process_failure(Some(1), None, "CLI failed: sk-ant-stderr-secret");
+
+        assert!(message.contains("stderr=CLI failed"));
+        assert!(!message.contains("sk-ant-stderr-secret"));
+        assert!(message.contains("[REDACTED]"));
+    }
+
+    #[test]
+    fn diagnostic_truncation_preserves_utf8_boundaries() {
+        let mut diagnostic = "界".repeat(8);
+        truncate_to_bytes(&mut diagnostic, 7);
+
+        assert_eq!(diagnostic, "界界");
+        assert!(diagnostic.len() <= 7);
+    }
 
     #[test]
     fn write_mcp_http_config_emits_http_url_with_bearer_header() {
