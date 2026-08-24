@@ -67,6 +67,7 @@ impl EventMapper {
                 Vec::new()
             }
             ClaudeCodeEvent::Error { message } => {
+                self.terminal_error = true;
                 if !message.trim().is_empty() {
                     self.error = Some(message);
                 }
@@ -398,6 +399,7 @@ mod tests {
         });
 
         assert!(m.error.is_none());
+        assert!(m.terminal_error);
     }
 
     #[test]
