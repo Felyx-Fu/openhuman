@@ -153,9 +153,14 @@ impl StreamJsonParser {
                         error
                             .get("message")
                             .and_then(Value::as_str)
-                            .or_else(|| error.as_str())
+                            .filter(|message| !message.trim().is_empty())
+                            .or_else(|| error.as_str().filter(|message| !message.trim().is_empty()))
                     })
-                    .or_else(|| v.get("message").and_then(Value::as_str))
+                    .or_else(|| {
+                        v.get("message")
+                            .and_then(Value::as_str)
+                            .filter(|message| !message.trim().is_empty())
+                    })
                     .unwrap_or_default()
                     .to_string(),
             },
@@ -244,6 +249,20 @@ mod tests {
         assert!(matches!(
             &events[0],
             ClaudeCodeEvent::Error { message } if message.is_empty()
+        ));
+    }
+
+    #[test]
+    fn empty_nested_error_message_falls_back_to_top_level_message() {
+        let mut p = StreamJsonParser::new();
+        let events = p.feed(
+            r#"{"type":"error","error":{"message":"  "},"message":"top-level failure"}
+"#,
+        );
+
+        assert!(matches!(
+            &events[0],
+            ClaudeCodeEvent::Error { message } if message == "top-level failure"
         ));
     }
 }

@@ -69,7 +69,6 @@ impl EventMapper {
                 Vec::new()
             }
             ClaudeCodeEvent::Result {
-                subtype,
                 usage,
                 total_cost_usd,
                 ..
@@ -84,9 +83,6 @@ impl EventMapper {
                     usage.charged_amount_usd = cost;
                 }
                 self.usage = parsed;
-                if subtype.as_deref() == Some("error") && self.error.is_none() {
-                    self.error = Some("claude reported `result.subtype=error`".into());
-                }
                 self.finished = true;
                 Vec::new()
             }
@@ -401,5 +397,19 @@ mod tests {
         });
 
         assert_eq!(m.error.as_deref(), Some("structured failure"));
+    }
+
+    #[test]
+    fn result_error_does_not_mask_stderr_fallback() {
+        let mut m = EventMapper::new();
+        m.handle(ClaudeCodeEvent::Result {
+            subtype: Some("error".into()),
+            usage: None,
+            total_cost_usd: None,
+            raw: Value::Null,
+        });
+
+        assert!(m.finished);
+        assert!(m.error.is_none());
     }
 }
