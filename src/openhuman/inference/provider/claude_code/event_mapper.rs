@@ -74,6 +74,7 @@ impl EventMapper {
             }
             ClaudeCodeEvent::Result {
                 subtype,
+                is_error,
                 usage,
                 total_cost_usd,
                 ..
@@ -88,7 +89,7 @@ impl EventMapper {
                     usage.charged_amount_usd = cost;
                 }
                 self.usage = parsed;
-                if subtype.as_deref() == Some("error") {
+                if is_error || subtype.as_deref() == Some("error") {
                     self.terminal_error = true;
                 }
                 self.finished = true;
@@ -344,6 +345,7 @@ mod tests {
         let mut m = EventMapper::new();
         m.handle(ClaudeCodeEvent::Result {
             subtype: Some("success".into()),
+            is_error: false,
             usage: Some(json!({
                 "input_tokens": 100,
                 "output_tokens": 50,
@@ -366,6 +368,7 @@ mod tests {
         let mut m = EventMapper::new();
         m.handle(ClaudeCodeEvent::Result {
             subtype: Some("success".into()),
+            is_error: false,
             usage: None,
             total_cost_usd: Some(0.05),
             raw: Value::Null,
@@ -412,6 +415,23 @@ mod tests {
         let mut m = EventMapper::new();
         m.handle(ClaudeCodeEvent::Result {
             subtype: Some("error".into()),
+            is_error: false,
+            usage: None,
+            total_cost_usd: None,
+            raw: Value::Null,
+        });
+
+        assert!(m.finished);
+        assert!(m.terminal_error);
+        assert!(m.error.is_none());
+    }
+
+    #[test]
+    fn result_is_error_flag_marks_terminal_failure() {
+        let mut m = EventMapper::new();
+        m.handle(ClaudeCodeEvent::Result {
+            subtype: Some("success".into()),
+            is_error: true,
             usage: None,
             total_cost_usd: None,
             raw: Value::Null,

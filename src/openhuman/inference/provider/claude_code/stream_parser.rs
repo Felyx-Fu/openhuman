@@ -30,6 +30,7 @@ pub enum ClaudeCodeEvent {
     },
     Result {
         subtype: Option<String>,
+        is_error: bool,
         usage: Option<Value>,
         total_cost_usd: Option<f64>,
         raw: Value,
@@ -137,10 +138,12 @@ impl StreamJsonParser {
             "rate_limit_event" => ClaudeCodeEvent::RateLimit { raw: v },
             "result" => {
                 let subtype = v.get("subtype").and_then(Value::as_str).map(str::to_string);
+                let is_error = v.get("is_error").and_then(Value::as_bool).unwrap_or(false);
                 let usage = v.get("usage").cloned();
                 let total_cost_usd = v.get("total_cost_usd").and_then(Value::as_f64);
                 ClaudeCodeEvent::Result {
                     subtype,
+                    is_error,
                     usage,
                     total_cost_usd,
                     raw: v,
@@ -208,6 +211,20 @@ mod tests {
         let events = p.end();
         assert_eq!(events.len(), 1);
         assert!(matches!(events[0], ClaudeCodeEvent::Result { .. }));
+    }
+
+    #[test]
+    fn parses_terminal_is_error_flag() {
+        let mut p = StreamJsonParser::new();
+        let events = p.feed(
+            r#"{"type":"result","subtype":"success","is_error":true}
+"#,
+        );
+
+        assert!(matches!(
+            &events[0],
+            ClaudeCodeEvent::Result { is_error: true, .. }
+        ));
     }
 
     #[test]
