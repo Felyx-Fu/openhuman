@@ -61,6 +61,15 @@ fn format_process_failure(
     )
 }
 
+fn format_terminal_result_failure(structured_error: Option<&str>) -> String {
+    let detail = structured_error
+        .filter(|error| !error.trim().is_empty())
+        .map(|error| crate::openhuman::inference::provider::sanitize_api_error(error.trim()))
+        .unwrap_or_else(|| "Claude Code reported a terminal result error".to_string());
+
+    format!("[claude-code][driver] {detail}")
+}
+
 /// Tools withheld in the DEFAULT (`acceptEdits`) posture: Claude Code can
 /// read/edit files in the project, but not run shell, hit the network, or
 /// fan out CC subagents. The user opts into the full toolset separately by
@@ -524,6 +533,12 @@ pub async fn run_turn(ctx: TurnContext<'_>) -> anyhow::Result<ChatResponse> {
             format_process_failure(status.code(), mapper.error.as_deref(), &stderr_text,)
         );
     }
+    if mapper.terminal_error {
+        anyhow::bail!(
+            "{}",
+            format_terminal_result_failure(mapper.error.as_deref())
+        );
+    }
     if let Some(err) = mapper.error.clone() {
         let sanitized = crate::openhuman::inference::provider::sanitize_api_error(err.trim());
         anyhow::bail!("[claude-code][driver] {}", sanitized);
@@ -557,6 +572,25 @@ mod tests {
 
         assert!(message.contains("stderr=CLI failed"));
         assert!(!message.contains("sk-ant-stderr-secret"));
+        assert!(message.contains("[REDACTED]"));
+    }
+
+    #[test]
+    fn terminal_result_failure_has_a_diagnostic_without_cli_text() {
+        let message = format_terminal_result_failure(None);
+
+        assert_eq!(
+            message,
+            "[claude-code][driver] Claude Code reported a terminal result error"
+        );
+    }
+
+    #[test]
+    fn terminal_result_failure_sanitizes_cli_text() {
+        let message = format_terminal_result_failure(Some("turn limit sk-ant-terminal-secret"));
+
+        assert!(message.contains("turn limit"));
+        assert!(!message.contains("sk-ant-terminal-secret"));
         assert!(message.contains("[REDACTED]"));
     }
 

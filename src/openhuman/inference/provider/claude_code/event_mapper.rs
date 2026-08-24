@@ -43,6 +43,10 @@ pub struct EventMapper {
     pub tool_calls: Vec<ToolCall>,
     pub usage: Option<UsageInfo>,
     pub error: Option<String>,
+    /// Whether the terminal result reported a semantic failure. This is kept
+    /// separate from `error` so a non-zero process can still prefer stderr
+    /// when the result event carries no useful diagnostic text.
+    pub terminal_error: bool,
     pub session_id: Option<String>,
     pub finished: bool,
 }
@@ -69,6 +73,7 @@ impl EventMapper {
                 Vec::new()
             }
             ClaudeCodeEvent::Result {
+                subtype,
                 usage,
                 total_cost_usd,
                 ..
@@ -83,6 +88,9 @@ impl EventMapper {
                     usage.charged_amount_usd = cost;
                 }
                 self.usage = parsed;
+                if subtype.as_deref() == Some("error") {
+                    self.terminal_error = true;
+                }
                 self.finished = true;
                 Vec::new()
             }
@@ -400,7 +408,7 @@ mod tests {
     }
 
     #[test]
-    fn result_error_does_not_mask_stderr_fallback() {
+    fn result_error_is_recorded_without_masking_stderr_fallback() {
         let mut m = EventMapper::new();
         m.handle(ClaudeCodeEvent::Result {
             subtype: Some("error".into()),
@@ -410,6 +418,7 @@ mod tests {
         });
 
         assert!(m.finished);
+        assert!(m.terminal_error);
         assert!(m.error.is_none());
     }
 }
