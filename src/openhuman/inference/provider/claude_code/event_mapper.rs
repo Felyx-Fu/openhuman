@@ -63,7 +63,9 @@ impl EventMapper {
                 Vec::new()
             }
             ClaudeCodeEvent::Error { message } => {
-                self.error = Some(message);
+                if !message.trim().is_empty() {
+                    self.error = Some(message);
+                }
                 Vec::new()
             }
             ClaudeCodeEvent::Result {
@@ -379,5 +381,25 @@ mod tests {
             message: json!({"type":"message","role":"assistant","content":[]}),
         });
         assert!(deltas.is_empty());
+    }
+
+    #[test]
+    fn empty_cli_error_does_not_override_stderr_fallback() {
+        let mut m = EventMapper::new();
+        m.handle(ClaudeCodeEvent::Error {
+            message: String::new(),
+        });
+
+        assert!(m.error.is_none());
+    }
+
+    #[test]
+    fn structured_cli_error_is_preserved() {
+        let mut m = EventMapper::new();
+        m.handle(ClaudeCodeEvent::Error {
+            message: "structured failure".into(),
+        });
+
+        assert_eq!(m.error.as_deref(), Some("structured failure"));
     }
 }

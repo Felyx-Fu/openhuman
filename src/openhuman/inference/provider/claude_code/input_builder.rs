@@ -5,8 +5,9 @@
 //!   { "type":"user", "message":{"role":"user","content":[{"type":"text","text":"..."}]} }
 //!
 //! v1 piping policy:
-//! - On a *new* CC session: send every supported history `ChatMessage` so
-//!   claude has full context (system message is conveyed via
+//! - On a *new* CC session: serialize every supported history `ChatMessage`
+//!   into one user turn so claude has full context without starting a new
+//!   generation for each historical row (system message is conveyed via
 //!   `--append-system-prompt`, not stdin). Claude Code only accepts `user`
 //!   roles in this stream, so prior assistant responses are represented as
 //!   clearly labelled user text.
@@ -18,43 +19,54 @@ use serde_json::{json, Value};
 use crate::openhuman::agent::messages::ChatMessage;
 
 const PREVIOUS_ASSISTANT_PREFIX: &str = "[Previous assistant response]\n";
+const HISTORY_SEPARATOR: &str = "\n\n";
 
 /// Build the bytes to write to claude's stdin. Returns an empty `Vec`
 /// when there is nothing to send (caller should abort).
 pub fn build_stdin(messages: &[ChatMessage], is_new_session: bool) -> Vec<u8> {
-    let mut out = String::new();
-    let to_emit: Vec<&ChatMessage> = if is_new_session {
-        messages.iter().filter(|m| m.role != "system").collect()
+    let text = if is_new_session {
+        let mut history: Option<String> = None;
+        for msg in messages.iter().filter(|m| m.role != "system") {
+            let part = match msg.role.as_str() {
+                "user" => msg.content.clone(),
+                "assistant" => format!("{PREVIOUS_ASSISTANT_PREFIX}{}", msg.content),
+                // CC stdin doesn't accept `system` or `tool` rows. The system
+                // prompt is plumbed via `--append-system-prompt`; tool roles
+                // belong to the harness, not the CLI's input format.
+                _ => continue,
+            };
+            if let Some(history) = &mut history {
+                history.push_str(HISTORY_SEPARATOR);
+                history.push_str(&part);
+            } else {
+                history = Some(part);
+            }
+        }
+        history
     } else {
         // Resume: only the trailing user turn matters.
         messages
             .iter()
             .rev()
             .find(|m| m.role == "user")
-            .into_iter()
-            .collect()
+            .map(|m| m.content.clone())
     };
 
-    for msg in to_emit {
-        let text = match msg.role.as_str() {
-            "user" => msg.content.clone(),
-            "assistant" => format!("{PREVIOUS_ASSISTANT_PREFIX}{}", msg.content),
-            // CC stdin doesn't accept `system` or `tool` rows. The system
-            // prompt is plumbed via `--append-system-prompt`; tool roles
-            // belong to the harness, not the CLI's input format.
-            _ => continue,
-        };
-        let line = json!({
-            "type": "user",
-            "message": {
-                // Claude Code's stream-json stdin accepts only user messages,
-                // including when prior assistant context is replayed.
-                "role": "user",
-                "content": [{"type": "text", "text": text}],
-            },
-        });
-        push_json_line(&mut out, &line);
-    }
+    let Some(text) = text else {
+        return Vec::new();
+    };
+
+    let line = json!({
+        "type": "user",
+        "message": {
+            // Claude Code's stream-json stdin accepts only user messages,
+            // including when prior assistant context is replayed.
+            "role": "user",
+            "content": [{"type": "text", "text": text}],
+        },
+    });
+    let mut out = String::new();
+    push_json_line(&mut out, &line);
 
     out.into_bytes()
 }
@@ -78,7 +90,7 @@ mod tests {
     }
 
     #[test]
-    fn new_session_pipes_supported_history_as_user_messages() {
+    fn new_session_serializes_supported_history_as_one_user_message() {
         let history = vec![
             msg("system", "you are helpful"),
             msg("user", "hi"),
@@ -88,20 +100,13 @@ mod tests {
         let bytes = build_stdin(&history, true);
         let s = String::from_utf8(bytes).unwrap();
         let lines: Vec<_> = s.lines().collect();
-        assert_eq!(lines.len(), 3); // system filtered out
-        let events: Vec<Value> = lines
-            .iter()
-            .map(|line| serde_json::from_str(line).unwrap())
-            .collect();
-        assert!(events
-            .iter()
-            .all(|event| event["message"]["role"] == "user"));
-        assert_eq!(events[0]["message"]["content"][0]["text"], "hi");
+        assert_eq!(lines.len(), 1); // system filtered out
+        let event: Value = serde_json::from_str(lines[0]).unwrap();
+        assert_eq!(event["message"]["role"], "user");
         assert_eq!(
-            events[1]["message"]["content"][0]["text"],
-            "[Previous assistant response]\nhello"
+            event["message"]["content"][0]["text"],
+            "hi\n\n[Previous assistant response]\nhello\n\nhow are you?"
         );
-        assert_eq!(events[2]["message"]["content"][0]["text"], "how are you?");
     }
 
     #[test]

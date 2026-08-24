@@ -149,8 +149,14 @@ impl StreamJsonParser {
             "error" => ClaudeCodeEvent::Error {
                 message: v
                     .get("error")
-                    .and_then(Value::as_str)
-                    .unwrap_or("claude-code error")
+                    .and_then(|error| {
+                        error
+                            .get("message")
+                            .and_then(Value::as_str)
+                            .or_else(|| error.as_str())
+                    })
+                    .or_else(|| v.get("message").and_then(Value::as_str))
+                    .unwrap_or_default()
                     .to_string(),
             },
             other => ClaudeCodeEvent::ParseError {
@@ -211,5 +217,33 @@ mod tests {
         let mut p = StreamJsonParser::new();
         let events = p.feed("not json\n");
         assert!(matches!(events[0], ClaudeCodeEvent::ParseError { .. }));
+    }
+
+    #[test]
+    fn parses_nested_error_message() {
+        let mut p = StreamJsonParser::new();
+        let events = p.feed(
+            r#"{"type":"error","error":{"message":"structured failure","type":"invalid_request"}}
+"#,
+        );
+
+        assert!(matches!(
+            &events[0],
+            ClaudeCodeEvent::Error { message } if message == "structured failure"
+        ));
+    }
+
+    #[test]
+    fn missing_error_message_does_not_create_generic_diagnostic() {
+        let mut p = StreamJsonParser::new();
+        let events = p.feed(
+            r#"{"type":"error","error":{"type":"unknown"}}
+"#,
+        );
+
+        assert!(matches!(
+            &events[0],
+            ClaudeCodeEvent::Error { message } if message.is_empty()
+        ));
     }
 }
